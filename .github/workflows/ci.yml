@@ -22,6 +22,12 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.19.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
       - name: Install FFmpeg
         run: sudo apt-get update && sudo apt-get install --yes ffmpeg
       - name: Install Python dependencies
@@ -30,6 +36,8 @@ jobs:
         run: ruff check .
       - name: Type check
         run: mypy evistream apps
+      - name: Check Linux toolchain
+        run: make doctor
       - name: Test
         run: pytest
       - name: Start API and verify health

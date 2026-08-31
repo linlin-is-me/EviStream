@@ -25,6 +25,15 @@ Open `http://localhost:5173`. The API health endpoint is
 
 ## Stage 0 verification commands
 
+From Ubuntu under WSL2 or another supported Linux environment:
+
+```bash
+make doctor
+```
+
+The doctor checks Python 3.11, Node 24, pnpm, FFmpeg, Docker Engine, Docker Compose,
+and the safe configuration files without printing credential values.
+
 ```powershell
 evistream run-demo-job --message stage0
 evistream probe-video tests/fixtures/media/stage0_sample.mp4
