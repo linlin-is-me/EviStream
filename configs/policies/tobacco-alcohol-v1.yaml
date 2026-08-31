@@ -1,0 +1,32 @@
+id: restricted.tobacco_alcohol.display
+version: 1
+name: 烟酒等受限商品展示审核
+enabled: true
+severity: MEDIUM
+trigger_terms:
+  - 烟草
+  - 酒类
+  - tobacco
+  - alcohol
+requirements:
+  - id: restricted_product_presence
+    type: visual_presence
+    required: true
+    description: 画面中是否出现烟草、酒类等受限商品
+  - id: promotion_or_consumption_context
+    type: temporal_context
+    required: true
+    description: 是否存在消费、推介或引导购买情境
+exceptions:
+  - news_report
+  - educational_context
+  - incidental_background
+decision:
+  reject_when:
+    all:
+      - restricted_product_presence
+      - promotion_or_consumption_context
+  escalate_when:
+    any:
+      - unresolved_exception
+      - contradictory_evidence

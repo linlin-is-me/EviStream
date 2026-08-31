@@ -1,4 +1,4 @@
-.PHONY: doctor dev-infra dev-infra-down migrate verify-stage1
+.PHONY: doctor dev-infra dev-infra-down migrate verify-stage1 verify-stage2
 
 PYTHON ?= python3.11
 
@@ -17,3 +17,11 @@ migrate:
 verify-stage1:
 	alembic upgrade head
 	pytest tests/unit tests/integration -m "not external"
+
+verify-stage2:
+	alembic upgrade head
+	evistream policy-validate configs/policies/violence-weapon-v1.yaml
+	evistream policy-validate configs/policies/dangerous-behavior-v1.yaml
+	evistream policy-validate configs/policies/tobacco-alcohol-v1.yaml
+	evistream seed-demo --check
+	pytest

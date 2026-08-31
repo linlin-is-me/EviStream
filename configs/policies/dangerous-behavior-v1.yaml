@@ -1,0 +1,32 @@
+id: dangerous.behavior
+version: 1
+name: 危险行为审核
+enabled: true
+severity: HIGH
+trigger_terms:
+  - 危险动作
+  - 模仿风险
+  - dangerous behavior
+  - stunt
+requirements:
+  - id: dangerous_action_presence
+    type: visual_presence
+    required: true
+    description: 画面中是否发生危险动作
+  - id: credible_harm_risk
+    type: temporal_context
+    required: true
+    description: 动作是否具有现实伤害或模仿风险
+exceptions:
+  - professional_supervision
+  - educational_context
+  - emergency_response
+decision:
+  reject_when:
+    all:
+      - dangerous_action_presence
+      - credible_harm_risk
+  escalate_when:
+    any:
+      - unresolved_exception
+      - contradictory_evidence
