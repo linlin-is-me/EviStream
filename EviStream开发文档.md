@@ -1,7 +1,7 @@
 # EviStream 开发文档
 
 > Evidence-Grounded Investigation Agent for Long-Form Video Moderation  
-> 文档版本：v0.5  
+> 文档版本：v0.6
 > 规划日期：2026-08-31  
 > 目标版本：GitHub Release v0.1.0  
 > GitHub 仓库：[https://github.com/linlin-is-me/EviStream.git](https://github.com/linlin-is-me/EviStream.git)
@@ -66,6 +66,7 @@ EviStream v0.1.0 达到以下条件后才视为完成：
 10. 仓库包含架构图、演示 GIF 或视频、实验结果和开源来源说明。
 11. 仓库不包含密钥、无授权数据、模型权重或无法公开的视频文件。
 12. Agent 在节点边界中断后能够从最近检查点恢复，重复队列消息不会重复生成案件或结论。
+13. 全新 Linux 环境能够使用 Docker Compose 启动 Mock Demo，容器重启后数据库和 Artifact 数据保持完整。
 
 ## 3. 项目边界
 
@@ -254,6 +255,50 @@ PENDING -> RUNNING -> SUCCEEDED
 JobStatus 只描述技术执行结果。调查正常完成但证据不足时，任务状态为 `SUCCEEDED`，案件或调查状态为 `NEEDS_HUMAN_REVIEW`；业务结论不能混入队列任务状态。
 
 PostgreSQL 提交任务记录后再发送队列消息。发送失败时任务保留为 `PENDING`，启动检查或管理命令可以重新投递未运行任务；v0.1.0 不实现事务型 Outbox。Worker 收到重复消息时根据 `request_key` 和当前状态跳过已完成任务，运行中的任务使用有限租约避免永久占用。
+
+### 5.4 部署平台与拓扑
+
+EviStream v0.1.0 的正式运行目标是单台 Linux 主机。官方部署文档以 Ubuntu LTS 为准，开发阶段推荐 Windows WSL2；macOS 提供尽力兼容，Windows 原生运行不作为首版验收条件。经过实际验证的 Linux 发行版和版本号在发布时写入 `docs/deployment.md`，避免提前承诺未经测试的平台。
+
+部署分为开发运行、完整演示和发布验收三种形态：
+
+| 形态 | 运行方式 | 目的 |
+|---|---|---|
+| 开发运行 | API 和 InlineExecutor 直接运行；PostgreSQL 使用 Docker；Artifact Store 使用本地目录 | 快速调试媒体、规则和 Agent 主流程 |
+| 完整演示 | Docker Compose 启动 Web、API、RQ Worker、PostgreSQL 和 Redis | 复现浏览器端完整业务流程 |
+| 发布验收 | 在全新 Linux 环境从公开仓库启动完整演示 | 验证文档、迁移、镜像、健康检查和持久化卷 |
+
+Docker Compose 包含以下服务：
+
+- `web`：构建 React 静态页面并访问 API。
+- `api`：运行 FastAPI，只处理短请求和任务提交。
+- `worker`：运行 RQ Worker，执行共享 Job Handler。
+- `postgres`：保存业务状态、pgvector 索引和数据库迁移结果。
+- `redis`：保存队列和可丢失缓存，不作为业务事实来源。
+
+原始视频、切片和关键帧默认挂载到具名卷或宿主机数据目录。开发模式使用 LocalArtifactStore；MinIO 仅作为可选适配器，不进入首版默认 Compose。使用云端模型 API 时，部署主机不需要 GPU；本地 ASR、OCR 或模型可以使用 CPU，GPU 镜像与本地大模型不作为 v0.1.0 发布条件。
+
+部署配置遵守以下约束：
+
+- `.env.example` 只保存变量名和安全默认值，真实密钥放入未跟踪的 `.env` 或部署平台密钥配置。
+- API、Worker 和脚本读取同一配置 Schema，容器镜像不写入密钥和业务数据。
+- PostgreSQL、Redis、API 和 Worker 配置健康检查；API 只有在数据库迁移完成后才接收业务请求。
+- 数据库和 Artifact Store 使用持久化卷，容器重建不得删除业务数据。
+- 日志输出到标准输出，案件轨迹和检查点仍写入 PostgreSQL。
+- 默认只暴露 Web 和 API 端口；PostgreSQL 与 Redis 不直接开放到公网。
+
+Makefile 计划提供以下稳定入口，底层命令可以随实现调整：
+
+```text
+make doctor        # 检查 Python、Node、FFmpeg、Docker 和配置
+make dev-infra     # 启动 PostgreSQL 等当前阶段所需基础设施
+make dev-api       # 启动 API 和同步执行器
+make demo-up       # 构建并启动完整 Docker Compose
+make demo-down     # 停止服务但保留持久化数据
+make verify-deploy # 迁移、健康检查和 Mock 冒烟测试
+```
+
+公网部署不是 v0.1.0 的强制条件。需要在线演示时，可以将完整 Compose 部署到一台 Linux 云主机，并在 Web 与 API 前增加 Caddy 或 Nginx 提供 TLS；首版不承诺高可用、自动扩缩容、生产级鉴权和互联网暴露后的安全运维能力。
 
 ## 6. 视频处理流水线
 
@@ -845,6 +890,7 @@ v0.1.0 先覆盖会导致主流程中断、数据重复或结论不可解释的�
 - 使用 30 至 60 秒的小型授权视频完成浏览器操作。
 - CI 默认使用 Mock Model Gateway，确保无密钥也能运行。
 - 真实模型测试由手动 GitHub Action 或本地命令触发。
+- 发布前在 Linux 中运行完整 Compose 冒烟测试，覆盖迁移、健康检查、上传、任务执行和容器重启。
 
 ### 14.2 数据计划
 
@@ -1055,15 +1101,17 @@ API 创建 `correlation_id`，任务记录、Redis 消息、Worker 日志、Agen
 ### Stage 0：仓库与最小验证，0.5 至 1 天
 
 - 初始化仓库、Python 和前端工程、基础目录、许可证及 `.gitignore`。
+- 确定并记录 Python、Node、FFmpeg、Docker 和 Ubuntu/WSL2 测试版本，实现 `make doctor`。
 - 配置 FastAPI 健康检查、基础 CI 和环境变量模板。
 - 定义 Application Services、TaskDispatcher、Job Handler 和 Model Gateway 的最小接口；提供 InlineExecutor 与 Mock Gateway。
 - 跑通 FFmpeg、通用 OpenAI-compatible Gateway、Mock Gateway 和一个 ASR 接口；参考测试使用 `qwen3.8-flash`。
 - 创建一个 30 至 60 秒授权测试视频；外部服务不可用时使用 Mock。
 
-阶段门：本地和 CI 均能启动最小服务，命令行能够解析测试视频，InlineExecutor 可以执行示例 Job Handler，真实模型与 Mock 返回相同结构。
+阶段门：WSL2 或 Linux 中 `make doctor` 通过，本地和 CI 均能启动最小服务，命令行能够解析测试视频，InlineExecutor 可以执行示例 Job Handler，真实模型与 Mock 返回相同结构。
 
 ### Stage 1：媒体处理流水线，第 1 至 2 天
 
+- 增加开发基础设施 Compose 和 `make dev-infra`，使用容器启动 PostgreSQL 与 pgvector。
 - 建立 videos、segments、artifacts、search_documents 和 processing_jobs 的 PostgreSQL 迁移。
 - 实现本地 Artifact Store、任务状态迁移和媒体 Job Handler。
 - 实现视频上传、ffprobe 校验和本地文件存储。
@@ -1071,7 +1119,7 @@ API 创建 `correlation_id`，任务记录、Redis 消息、Worker 日志、Agen
 - 使用统一 OpenAI-compatible Gateway 生成视觉描述；用户模型由环境变量指定，参考测试使用 `qwen3.8-flash`。
 - 保存片段、字幕、OCR 和关键帧元数据。
 
-阶段门：输入视频后能够从数据库查看任务状态和完整的时间化中间产物；重复提交不会生成两条同时运行的媒体任务。
+阶段门：重新创建 API 进程后仍能从 PostgreSQL 和本地 Artifact Store 读取完整中间产物；重复提交不会生成两条同时运行的媒体任务。
 
 ### Stage 2：领域模型与规则，第 3 天
 
@@ -1114,8 +1162,9 @@ API 创建 `correlation_id`，任务记录、Redis 消息、Worker 日志、Agen
 - 完成视频、案件、复核、申诉、模型档案和重放 API。
 - 完成任务中心、案件工作台、规则与重放三个主界面；上传任务支持选择已配置的模型档案。
 - 增加失败重试、任务去重和结构化日志。
+- 完成 Web、API、Worker、PostgreSQL 和 Redis 的完整 Docker Compose，以及 `make demo-up` 和健康检查。
 
-阶段门：浏览器可以完成上传、调查、复核、申诉和重放的完整流程；同步与异步模式对固定输入产生一致业务结果。
+阶段门：浏览器可以在完整 Compose 中完成上传、调查、复核、申诉和重放；同步与异步模式对固定输入产生一致业务结果，容器重建后持久化数据仍然存在。
 
 ### Stage 7：评测与测试，第 12 至 13 天
 
@@ -1130,12 +1179,13 @@ API 创建 `correlation_id`，任务记录、Redis 消息、Worker 日志、Agen
 
 ### Stage 8：开源发布，第 14 至 15 天
 
-- 完成 Docker Compose、README、架构图、演示 GIF 和三分钟视频。
+- 完成生产演示用 Dockerfile、Compose 配置、README、架构图、演示 GIF 和三分钟视频。
 - 完成许可证、第三方声明、数据来源、复用边界和已知限制。
-- 在干净目录执行启动验证，修复发布阻塞问题。
+- 在全新 Linux 环境从公开仓库执行 `make demo-up` 和 `make verify-deploy`，修复发布阻塞问题。
+- 在 `docs/deployment.md` 记录实际验证的平台版本、资源占用、端口、持久化目录、升级和数据清理方法。
 - 创建 GitHub Release v0.1.0。
 
-阶段门：无密钥环境可以运行 Mock Demo，配置真实模型后可以运行完整 Demo。
+阶段门：无密钥 Linux 环境可以运行 Mock Demo，配置真实模型后可以运行完整 Demo；数据库迁移、健康检查、重启恢复和持久化卷验证通过。
 
 ### 17.2 可选质量增强，第 4 周
 
@@ -1195,7 +1245,7 @@ P0 和复杂 Issue 记录问题、范围和完成条件；小型修复可以直�
 | 03 | `docs: add product scope architecture and development plan` | 项目目标与复用边界清楚 |
 | 04 | `feat(core): add application services dispatcher and inline jobs` | 同步执行器运行共享 Job Handler |
 | 05 | `feat(models): add configurable OpenAI-compatible and Mock gateways` | 用户模型与 Mock 返回统一结构 |
-| 06 | `feat(storage): add media job models artifact store and migrations` | 空库可迁移，媒体任务状态可保存 |
+| 06 | `feat(storage): add postgres media jobs artifacts and migrations` | 开发 Compose 可启动 PostgreSQL，空库可迁移 |
 | 07 | `feat(media): add video upload and ffprobe validation` | API 可以接收并解析视频 |
 | 08 | `feat(media): add scene segmentation and keyframe extraction` | 生成带时间戳的片段与关键帧 |
 | 09 | `feat(media): add ASR OCR and visual caption extraction` | 生成字幕、画面文字和视觉描述 |
@@ -1211,15 +1261,16 @@ P0 和复杂 Issue 记录问题、范围和完成条件；小型修复可以直�
 | 19 | `feat(review): add human review and appeal workflow` | 人工结论与申诉可以保存 |
 | 20 | `feat(replay): add policy diff preview and invalidation rules` | 展示影响范围、复用数据和结论差异 |
 | 21 | `feat(worker): add RQ executor retries leases and deduplication` | 异步执行与同步执行保持一致 |
-| 22 | `feat(api): expose model case review policy and replay endpoints` | OpenAPI 覆盖模型选择和完整业务流程 |
-| 23 | `feat(web): add model selector task case and policy workspaces` | 浏览器选择模型并完成端到端操作 |
-| 24 | `feat(observability): correlate jobs agent tools and model calls` | 可以按 correlation ID 追踪完整请求 |
-| 25 | `test: add mock contracts recovery and smoke tests` | 无密钥回归、重复消息和恢复测试可运行 |
-| 26 | `feat(data): add fixtures case manifests and dataset adapters` | 演示数据与公共数据子集可以准备 |
-| 27 | `feat(eval): add baselines metrics and reports` | 生成可复现评测结果 |
-| 28 | `build: add docker compose and release workflow` | 干净环境可以启动系统 |
-| 29 | `docs: add quickstart demo results and reuse boundary` | README 和演示材料完整 |
-| 30 | `chore(release): prepare v0.1.0` | 创建正式 Release |
+| 22 | `build: add full compose health checks and persistent volumes` | Linux Compose 可以启动完整服务并保留数据 |
+| 23 | `feat(api): expose model case review policy and replay endpoints` | OpenAPI 覆盖模型选择和完整业务流程 |
+| 24 | `feat(web): add model selector task case and policy workspaces` | 浏览器选择模型并完成端到端操作 |
+| 25 | `feat(observability): correlate jobs agent tools and model calls` | 可以按 correlation ID 追踪完整请求 |
+| 26 | `test: add mock contracts recovery and compose smoke tests` | 无密钥回归、重复消息、恢复和部署测试可运行 |
+| 27 | `feat(data): add fixtures case manifests and dataset adapters` | 演示数据与公共数据子集可以准备 |
+| 28 | `feat(eval): add baselines metrics and reports` | 生成可复现评测结果 |
+| 29 | `build: add release workflow and clean linux verification` | 全新 Linux 环境可以复现 Demo |
+| 30 | `docs: add quickstart deployment results and reuse boundary` | README、部署和演示材料完整 |
+| 31 | `chore(release): prepare v0.1.0` | 创建正式 Release |
 
 ### 18.3 GitHub 工程量呈现
 
@@ -1254,13 +1305,14 @@ git remote add origin https://github.com/linlin-is-me/EviStream.git
 3. 业务问题与主要能力。
 4. 系统架构图。
 5. 三分钟 Quick Start。
-6. Demo 操作流程。
-7. Agent 工具与状态机。
-8. 评测数据、基线与真实结果。
-9. 项目目录。
-10. 配置本地模型或 API。
-11. 开源复用边界。
-12. Roadmap、贡献方式和许可证。
+6. Linux、WSL2 与 Docker 部署要求。
+7. Demo 操作流程。
+8. Agent 工具与状态机。
+9. 评测数据、基线与真实结果。
+10. 项目目录。
+11. 配置本地模型或 API。
+12. 开源复用边界。
+13. Roadmap、贡献方式和许可证。
 
 ### 19.3 开源仓库必备文件
 
@@ -1280,8 +1332,10 @@ git remote add origin https://github.com/linlin-is-me/EviStream.git
 - 使用密钥扫描工具检查完整 Git 历史。
 - 检查大文件、模型权重和视频是否误入 Git。
 - 检查第三方代码的许可证头和修改说明。
-- 在全新环境执行 `docker compose up --build`。
+- 在全新 Linux 环境执行 `make doctor`、`make demo-up` 和 `make verify-deploy`。
 - 运行后端测试、前端构建、数据库迁移和端到端测试。
+- 重启容器并确认 PostgreSQL 与 Artifact Store 数据未丢失。
+- 检查默认端口暴露、健康检查、持久化卷和无密钥 Mock 模式。
 - 核对所有截图、指标和演示与当前版本一致。
 - 明确列出已知限制，不使用生产可用等未经验证的描述。
 
@@ -1334,6 +1388,8 @@ git remote add origin https://github.com/linlin-is-me/EviStream.git
 | 规则类别数据不足 | 指标不可信 | 替换类别，不增加类别数量 |
 | Agent 输出不稳定 | 测试难复现 | 温度设为 0，使用结构化 Schema、Mock 回归样例和轻量规则判定器 |
 | 模型 API 限流 | 任务失败 | 队列退避、缓存、并发限制和 Mock 模式 |
+| Windows 原生依赖兼容问题 | FFmpeg、Worker 或数据库环境不一致 | 官方开发路径使用 WSL2，Windows 原生不作为发布门槛 |
+| 开发初期 Docker 不可用 | PostgreSQL 和完整服务暂时无法启动 | Stage 0 先完成 Inline 与 Mock；进入 Stage 1 前解决 Docker，或临时连接兼容 PostgreSQL |
 | 队列消息丢失或重复 | 任务停滞或重复执行 | PostgreSQL 保存任务状态，启动检查重投 PENDING，request_key 识别重复消息 |
 | Worker 中断后重复推进 Agent | 证据或结论重复 | 节点检查点、state_version 和追加写入记录 |
 | 选择性重放过于复杂 | 主流程阻塞 | 首版按规则 ID 和 Requirement 类型计算影响范围 |
@@ -1357,12 +1413,13 @@ git remote add origin https://github.com/linlin-is-me/EviStream.git
 - [ ] Evidence Store、RequirementResult 聚合器和轻量规则判定器。
 - [ ] 案件、人工复核、申诉、重放预览和失效规则。
 - [ ] Web Console。
-- [ ] Docker Compose 和数据库迁移。
+- [ ] Linux Docker Compose、数据库迁移、健康检查和持久化卷。
 
 ### 测试与评测
 
 - [ ] 单元、契约、集成和端到端测试。
 - [ ] 同步与异步一致性、重复消息、任务重试和 Agent 恢复测试。
+- [ ] Linux Compose 启动、重启恢复和无密钥 Mock 冒烟测试。
 - [ ] Mock Model Gateway。
 - [ ] 供应商无关的 OpenAI-compatible Gateway，以及 Agent、Triage、Verify、Judge 四类用户模型配置。
 - [ ] 阿里云参考测试配置、通用用户模板和模型能力探测。
@@ -1376,7 +1433,7 @@ git remote add origin https://github.com/linlin-is-me/EviStream.git
 ### 文档与开源
 
 - [ ] README、架构图和 Quick Start。
-- [ ] Agent、任务状态、证据聚合、规则重放、评测和部署文档。
+- [ ] Agent、任务状态、证据聚合、规则重放、评测和 Linux/WSL2 部署文档。
 - [ ] 主要架构决策记录。
 - [ ] 复用边界和第三方声明。
 - [ ] 演示 GIF 与三分钟视频。
