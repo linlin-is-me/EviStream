@@ -17,7 +17,9 @@ from evistream.application import (
 )
 from evistream.config import Settings, get_settings
 from evistream.media.asr import ASRAdapter, ASRRequest, FasterWhisperASR, MockASR
+from evistream.media.extractors import MockOCR, MockVisualDescription
 from evistream.media.probe import MediaProbeError, probe_video
+from evistream.media.service import MediaApplicationService
 from evistream.models import (
     ModelError,
     ModelMessage,
@@ -25,6 +27,8 @@ from evistream.models import (
     ModelRole,
     build_model_gateway,
 )
+from evistream.storage.artifacts import LocalArtifactStore
+from evistream.storage.database import Database
 
 app = typer.Typer(no_args_is_help=True, help="EviStream Stage 0 verification commands.")
 
@@ -119,10 +123,47 @@ def asr_smoke(
     typer.echo(result.model_dump_json(indent=2))
 
 
+@app.command("media-ingest")
+def media_ingest(
+    path: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],
+    process: Annotated[bool, typer.Option(help="Run preprocessing immediately.")] = False,
+) -> None:
+    service = _media_service(_load_settings())
+    video, job = service.register_file(path)
+    if process:
+        job = service.process_job(job.job_id)
+        video = service.get_video(video.video_id)
+    typer.echo(
+        json.dumps(
+            {"video": video.model_dump(mode="json"), "job": job.model_dump(mode="json")},
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+
+
+@app.command("media-process")
+def media_process(job_id: Annotated[str, typer.Argument()]) -> None:
+    service = _media_service(_load_settings())
+    job = service.process_job(job_id)
+    typer.echo(job.model_dump_json(indent=2))
+
+
 def _load_settings() -> Settings:
     load_dotenv()
     get_settings.cache_clear()
     return get_settings()
+
+
+def _media_service(settings: Settings) -> MediaApplicationService:
+    return MediaApplicationService(
+        Database(settings.database_url),
+        LocalArtifactStore(settings.artifact_root),
+        settings,
+        MockASR(),
+        MockOCR(),
+        MockVisualDescription(),
+    )
 
 
 def _fail(code: object, message: str) -> None:

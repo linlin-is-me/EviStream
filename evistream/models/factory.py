@@ -31,4 +31,3 @@ def build_model_gateway(
         structured_output=resolved.defaults.structured_output,
         max_attempts=resolved.defaults.max_attempts,
     )
-

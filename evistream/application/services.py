@@ -26,4 +26,3 @@ class ApplicationService:
             payload={"message": normalized},
         )
         return await self._dispatcher.dispatch(request)
-

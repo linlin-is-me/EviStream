@@ -22,6 +22,11 @@ dependencies = [
   "openai>=1.60,<3",
   "pydantic>=2.10,<3",
   "pydantic-settings>=2.7,<3",
+  "sqlalchemy>=2.0,<3",
+  "alembic>=1.14,<2",
+  "psycopg[binary]>=3.2,<4",
+  "pgvector>=0.3,<1",
+  "python-multipart>=0.0.20,<1",
   "python-dotenv>=1,<2",
   "PyYAML>=6,<7",
   "typer>=0.15,<1",
@@ -30,6 +35,7 @@ dependencies = [
 
 [project.optional-dependencies]
 asr = ["faster-whisper>=1.1,<2"]
+ocr = ["paddleocr>=3,<4"]
 dev = [
   "mypy>=1.15,<2",
   "pytest>=8,<10",
@@ -73,5 +79,5 @@ plugins = ["pydantic.mypy"]
 exclude = ["apps/web"]
 
 [[tool.mypy.overrides]]
-module = ["faster_whisper"]
+module = ["faster_whisper", "paddleocr"]
 ignore_missing_imports = true

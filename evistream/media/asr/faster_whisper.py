@@ -56,4 +56,3 @@ def _convert_segments(raw_segments: Iterable[Any]) -> list[ASRSegment]:
             )
         )
     return converted
-

@@ -33,4 +33,3 @@ class ASRResponse(BaseModel):
 
 class ASRAdapter(Protocol):
     def transcribe(self, request: ASRRequest) -> ASRResponse: ...
-

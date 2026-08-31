@@ -55,4 +55,3 @@ def test_probe_maps_process_timeout(tmp_path: Path) -> None:
         probe_video(media, timeout_seconds=1)
 
     assert caught.value.code is MediaProbeErrorCode.MEDIA_DECODE_FAILED
-

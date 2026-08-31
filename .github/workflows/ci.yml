@@ -16,6 +16,22 @@ jobs:
   backend:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: evistream
+          POSTGRES_USER: evistream
+          POSTGRES_PASSWORD: evistream
+        ports:
+          - 54329:5432
+        options: >-
+          --health-cmd "pg_isready -U evistream -d evistream"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      EVISTREAM_DATABASE_URL: postgresql+psycopg://evistream:evistream@127.0.0.1:54329/evistream
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -38,6 +54,8 @@ jobs:
         run: mypy evistream apps
       - name: Check Linux toolchain
         run: make doctor
+      - name: Migrate database
+        run: alembic upgrade head
       - name: Test
         run: pytest
       - name: Start API and verify health

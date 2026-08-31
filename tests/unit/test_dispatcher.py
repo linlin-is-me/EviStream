@@ -46,4 +46,3 @@ def test_registry_rejects_duplicate_handlers() -> None:
 
     with pytest.raises(ValueError, match="already registered"):
         registry.register("DEMO", DemoJobHandler())
-
