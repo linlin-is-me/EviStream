@@ -29,9 +29,14 @@ class Settings(BaseSettings):
     asr_model: str = "tiny.en"
     asr_device: str = "cpu"
     asr_compute_type: str = "int8"
+    database_url: str = "postgresql+psycopg://evistream:evistream@localhost:54329/evistream"
+    artifact_root: Path = Path("data/artifacts")
+    upload_max_bytes: int = Field(default=2 * 1024 * 1024 * 1024, gt=0)
+    video_max_duration_seconds: int = Field(default=3600, gt=0)
+    scene_threshold: float = Field(default=0.3, gt=0, lt=1)
+    simulated_stream_segment_seconds: int = Field(default=10, gt=0)
 
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     return Settings()
-

@@ -27,4 +27,3 @@ def test_factory_builds_generic_compatible_gateway() -> None:
     )
 
     assert isinstance(gateway, OpenAICompatibleGateway)
-

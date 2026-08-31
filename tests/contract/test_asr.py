@@ -13,4 +13,3 @@ def test_mock_asr_returns_common_contract(tmp_path: Path) -> None:
     assert result.model == "mock-asr"
     assert result.segments[0].start_ms == 0
     assert result.segments[0].end_ms > result.segments[0].start_ms
-

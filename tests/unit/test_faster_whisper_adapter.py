@@ -11,4 +11,3 @@ def test_faster_whisper_segments_are_normalized_to_milliseconds() -> None:
     assert segments[0].start_ms == 250
     assert segments[0].end_ms == 1750
     assert segments[0].text == "stage zero"
-

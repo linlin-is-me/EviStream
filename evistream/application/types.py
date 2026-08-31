@@ -10,6 +10,7 @@ class JobStatus(StrEnum):
     PENDING = "PENDING"
     RUNNING = "RUNNING"
     SUCCEEDED = "SUCCEEDED"
+    RETRY_WAIT = "RETRY_WAIT"
     FAILED = "FAILED"
     CANCELLED = "CANCELLED"
 
@@ -38,4 +39,3 @@ class JobHandler(Protocol):
 
 class TaskDispatcher(Protocol):
     async def dispatch(self, request: JobRequest) -> JobExecution: ...
-
