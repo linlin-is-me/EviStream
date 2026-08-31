@@ -20,4 +20,3 @@ class MockASR:
             model="mock-asr",
             duration_ms=3000,
         )
-

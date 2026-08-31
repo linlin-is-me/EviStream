@@ -10,4 +10,3 @@ class DemoJobHandler:
             raise ValueError("payload.message must be a non-empty string")
         normalized = message.strip()
         return {"message": normalized, "uppercase": normalized.upper()}
-

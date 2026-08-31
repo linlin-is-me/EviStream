@@ -7,5 +7,5 @@ follow Semantic Versioning.
 
 ### Added
 
+- Stage 1 PostgreSQL media pipeline, local artifacts and persistent media jobs.
 - Stage 0 repository foundation is in progress.
-

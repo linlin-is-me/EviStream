@@ -51,4 +51,3 @@ class MockGateway:
             finish_reason="stop",
             provider_request_id="mock-request",
         )
-

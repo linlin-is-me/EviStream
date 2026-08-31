@@ -63,4 +63,3 @@ def test_probe_cli_outputs_normalized_json(tmp_path: Path) -> None:
 
     assert result.exit_code == 0
     assert '"duration_ms": 30000' in result.stdout
-

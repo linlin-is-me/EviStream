@@ -16,4 +16,3 @@ def test_health_endpoint_reports_runtime_mode() -> None:
         "version": "0.1.0.dev0",
         "mode": "test",
     }
-
