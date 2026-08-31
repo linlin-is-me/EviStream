@@ -1,0 +1,18 @@
+name: mock
+gateway: mock
+models:
+  agent_env: EVISTREAM_AGENT_MODEL
+  triage_env: EVISTREAM_TRIAGE_MODEL
+  verifier_env: EVISTREAM_VERIFY_MODEL
+  judge_env: EVISTREAM_JUDGE_MODEL
+defaults:
+  temperature: 0
+  timeout_seconds: 5
+  structured_output: true
+  max_attempts: 1
+capabilities:
+  text: true
+  image: false
+  video: false
+  structured_output: true
+
