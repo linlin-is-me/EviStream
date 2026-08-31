@@ -1,8 +1,8 @@
 # EviStream
 
 EviStream is an evidence-grounded investigation agent for long-form video moderation.
-The repository contains the Stage 0 provider-neutral foundation and the Stage 1
-PostgreSQL-backed media pipeline.
+The repository contains the provider-neutral foundation, PostgreSQL-backed media
+pipeline, and Stage 2 moderation domain and YAML policy compiler.
 
 ## Development quick start
 
@@ -19,6 +19,7 @@ Start the Stage 1 database and migrate it from WSL2 or Linux:
 make dev-infra
 make migrate
 evistream media-ingest tests/fixtures/media/stage0_sample.mp4 --process
+evistream seed-demo --check
 ```
 
 In another terminal:
@@ -59,9 +60,9 @@ The current verification state is recorded in
 
 ## Project boundaries
 
-Stage 1 includes database-backed uploads, local artifacts, media jobs, scene/keyframe
-extraction, ASR, OCR and visual-description adapter boundaries. Queues, retrieval, the
-Agent investigation loop, and moderation decisions remain later stages. See
+Stage 2 adds versioned policies, cases, evidence contracts and deterministic rule
+compilation. Evidence aggregation, rule evaluation, queues, retrieval and the Agent
+investigation loop remain later stages. See
 [`EviStream开发文档.md`](EviStream开发文档.md) for the complete architecture and roadmap.
 
 ## License

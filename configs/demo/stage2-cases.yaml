@@ -1,0 +1,99 @@
+cases:
+  - case_key: seed.violence_weapon.clear
+    scenario: clear_violation
+    fixture_ref: violence_weapon_clear
+    policy_id: restricted.violence_weapon.display
+    policy_version: 1
+    expected_verdict: REJECT
+    expected_requirement_results:
+      risk_visual_presence: SATISFIED
+      harmful_display_context: SATISFIED
+      exception.news_report: NOT_SATISFIED
+    reason: 暴力或武器及相关行为均有明确证据，未发现例外。
+  - case_key: seed.violence_weapon.exception
+    scenario: context_exception
+    fixture_ref: violence_weapon_exception
+    policy_id: restricted.violence_weapon.display
+    policy_version: 1
+    expected_verdict: APPROVE
+    expected_requirement_results:
+      risk_visual_presence: SATISFIED
+      harmful_display_context: SATISFIED
+      exception.fictional_prop_context: SATISFIED
+    reason: 画面明确说明相关物品属于影视道具。
+  - case_key: seed.violence_weapon.unknown
+    scenario: insufficient_evidence
+    fixture_ref: violence_weapon_unknown
+    policy_id: restricted.violence_weapon.display
+    policy_version: 1
+    expected_verdict: NEEDS_HUMAN_REVIEW
+    expected_requirement_results:
+      risk_visual_presence: UNKNOWN
+      harmful_display_context: UNKNOWN
+    reason: 物体与行为均无法从有限画面确认。
+
+  - case_key: seed.dangerous_behavior.clear
+    scenario: clear_violation
+    fixture_ref: dangerous_behavior_clear
+    policy_id: dangerous.behavior
+    policy_version: 1
+    expected_verdict: REJECT
+    expected_requirement_results:
+      dangerous_action_presence: SATISFIED
+      credible_harm_risk: SATISFIED
+      exception.professional_supervision: NOT_SATISFIED
+    reason: 危险动作和现实伤害风险均成立，未见专业监督。
+  - case_key: seed.dangerous_behavior.exception
+    scenario: context_exception
+    fixture_ref: dangerous_behavior_exception
+    policy_id: dangerous.behavior
+    policy_version: 1
+    expected_verdict: APPROVE
+    expected_requirement_results:
+      dangerous_action_presence: SATISFIED
+      credible_harm_risk: SATISFIED
+      exception.professional_supervision: SATISFIED
+    reason: 动作由专业人员在有安全装备的受控环境中完成。
+  - case_key: seed.dangerous_behavior.unknown
+    scenario: insufficient_evidence
+    fixture_ref: dangerous_behavior_unknown
+    policy_id: dangerous.behavior
+    policy_version: 1
+    expected_verdict: NEEDS_HUMAN_REVIEW
+    expected_requirement_results:
+      dangerous_action_presence: SATISFIED
+      credible_harm_risk: UNKNOWN
+    reason: 可以观察到动作，但无法确认环境和实际风险。
+
+  - case_key: seed.tobacco_alcohol.clear
+    scenario: clear_violation
+    fixture_ref: tobacco_alcohol_clear
+    policy_id: restricted.tobacco_alcohol.display
+    policy_version: 1
+    expected_verdict: REJECT
+    expected_requirement_results:
+      restricted_product_presence: SATISFIED
+      promotion_or_consumption_context: SATISFIED
+      exception.incidental_background: NOT_SATISFIED
+    reason: 受限商品出现且存在明确消费或推介情境。
+  - case_key: seed.tobacco_alcohol.exception
+    scenario: context_exception
+    fixture_ref: tobacco_alcohol_exception
+    policy_id: restricted.tobacco_alcohol.display
+    policy_version: 1
+    expected_verdict: APPROVE
+    expected_requirement_results:
+      restricted_product_presence: SATISFIED
+      promotion_or_consumption_context: NOT_SATISFIED
+      exception.incidental_background: SATISFIED
+    reason: 商品只在背景中偶然出现，没有推介或消费行为。
+  - case_key: seed.tobacco_alcohol.unknown
+    scenario: insufficient_evidence
+    fixture_ref: tobacco_alcohol_unknown
+    policy_id: restricted.tobacco_alcohol.display
+    policy_version: 1
+    expected_verdict: NEEDS_HUMAN_REVIEW
+    expected_requirement_results:
+      restricted_product_presence: UNKNOWN
+      promotion_or_consumption_context: UNKNOWN
+    reason: 标签和上下文均不清晰，现有证据不足。

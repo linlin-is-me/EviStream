@@ -1,0 +1,32 @@
+id: restricted.violence_weapon.display
+version: 1
+name: 暴力与武器展示审核
+enabled: true
+severity: HIGH
+trigger_terms:
+  - 暴力
+  - 武器
+  - weapon
+  - violence
+requirements:
+  - id: risk_visual_presence
+    type: visual_presence
+    required: true
+    description: 画面中是否出现暴力场景或受限武器
+  - id: harmful_display_context
+    type: temporal_context
+    required: true
+    description: 是否存在展示、使用、攻击或威胁行为
+exceptions:
+  - news_report
+  - educational_context
+  - fictional_prop_context
+decision:
+  reject_when:
+    all:
+      - risk_visual_presence
+      - harmful_display_context
+  escalate_when:
+    any:
+      - unresolved_exception
+      - contradictory_evidence

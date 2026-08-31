@@ -3,7 +3,7 @@
 import asyncio
 import json
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, NoReturn
 
 import typer
 from dotenv import load_dotenv
@@ -27,6 +27,10 @@ from evistream.models import (
     ModelRole,
     build_model_gateway,
 )
+from evistream.policies.compiler import PolicyCompiler
+from evistream.policies.schema import PolicyError, load_policy
+from evistream.policies.seeds import apply_demo_seeds, validate_demo_seeds
+from evistream.policies.versioning import PolicyVersionError, PolicyVersionService
 from evistream.storage.artifacts import LocalArtifactStore
 from evistream.storage.database import Database
 
@@ -149,6 +153,95 @@ def media_process(job_id: Annotated[str, typer.Argument()]) -> None:
     typer.echo(job.model_dump_json(indent=2))
 
 
+@app.command("policy-validate")
+def policy_validate(path: Annotated[Path, typer.Argument(exists=True, dir_okay=False)]) -> None:
+    try:
+        loaded = load_policy(path)
+        compiled = PolicyCompiler().compile(loaded)
+    except PolicyError as error:
+        _fail(error.code, str(error))
+    typer.echo(
+        json.dumps(
+            {
+                "ok": True,
+                "policy_id": compiled.policy_id,
+                "version": compiled.version,
+                "source_sha256": loaded.source_sha256,
+                "semantic_sha256": compiled.semantic_sha256,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+
+
+@app.command("policy-compile")
+def policy_compile(path: Annotated[Path, typer.Argument(exists=True, dir_okay=False)]) -> None:
+    try:
+        compiled = PolicyCompiler().compile(load_policy(path))
+    except PolicyError as error:
+        _fail(error.code, str(error))
+    typer.echo(compiled.model_dump_json(indent=2))
+
+
+@app.command("policy-publish")
+def policy_publish(
+    path: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],
+    lifecycle: Annotated[
+        str, typer.Option(help="Policy lifecycle: draft or published.")
+    ] = "published",
+) -> None:
+    settings = _load_settings()
+    service = PolicyVersionService(Database(settings.database_url))
+    try:
+        source = load_policy(path)
+        if lifecycle.lower() == "draft":
+            policy = service.save_draft(source)
+        elif lifecycle.lower() == "published":
+            policy = service.publish(source)
+        else:
+            _fail("INPUT_INVALID", f"unknown policy lifecycle: {lifecycle}")
+    except PolicyError as error:
+        _fail(error.code, str(error))
+    except PolicyVersionError as error:
+        _fail(error.code, str(error))
+    typer.echo(policy.model_dump_json(indent=2))
+
+
+@app.command("seed-demo")
+def seed_demo(
+    check: Annotated[bool, typer.Option(help="Validate metadata without database writes.")] = False,
+    apply: Annotated[bool, typer.Option(help="Publish policies and create mapped cases.")] = False,
+    video_map: Annotated[
+        Path | None,
+        typer.Option(exists=True, dir_okay=False, help="fixture_ref to video_id YAML map."),
+    ] = None,
+    model_profile: Annotated[str, typer.Option()] = "mock",
+) -> None:
+    if check == apply:
+        _fail("INPUT_INVALID", "select exactly one of --check or --apply")
+    policy_dir = Path("configs/policies")
+    manifest = Path("configs/demo/stage2-cases.yaml")
+    try:
+        if check:
+            summary = validate_demo_seeds(policy_dir, manifest)
+        else:
+            if video_map is None:
+                _fail("INPUT_INVALID", "--video-map is required with --apply")
+            summary = apply_demo_seeds(
+                Database(_load_settings().database_url),
+                policy_dir,
+                manifest,
+                video_map,
+                model_profile=model_profile,
+            )
+    except PolicyError as error:
+        _fail(error.code, str(error))
+    except PolicyVersionError as error:
+        _fail(error.code, str(error))
+    typer.echo(summary.model_dump_json(indent=2))
+
+
 def _load_settings() -> Settings:
     load_dotenv()
     get_settings.cache_clear()
@@ -166,7 +259,7 @@ def _media_service(settings: Settings) -> MediaApplicationService:
     )
 
 
-def _fail(code: object, message: str) -> None:
+def _fail(code: object, message: str) -> NoReturn:
     typer.echo(json.dumps({"error_code": str(code), "message": message}, ensure_ascii=False))
     raise typer.Exit(code=1)
 
