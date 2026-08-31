@@ -2,7 +2,7 @@
 
 日期：2026-08-31  
 分支：`stage/0-foundation`  
-状态：本地阶段门已通过，等待远程 CI。
+状态：本地与远程阶段门全部通过。
 
 ## 本地环境
 
@@ -52,10 +52,15 @@ Token、输出 79 Token，总计 159 Token。完整的非敏感响应元数据�
 页面已经在真实 Vite 与 Uvicorn 进程组合下核对。默认使用同源健康接口，Vite 在开发期代理
 `/api`，分离部署时可设置 `VITE_API_BASE_URL`。
 
-## 尚未通过的阶段门
+## 远程 CI
 
-- 分支尚未推送，GitHub Actions 尚未运行。
-- 当前需要提交新增部署约束与 Linux doctor，然后推送两个分支，等待 CI 全绿，再合并 PR。
+- [PR #2](https://github.com/linlin-is-me/EviStream/pull/2) 的 Push 与 Pull Request
+  工作流均通过。
+- 两个后端 Job 均耗时 1 分 12 秒；两个前端 Job 分别耗时 20 秒和 22 秒。
+- 后端完成 Ruff、mypy、pytest、Linux doctor、FFprobe 和实际 Uvicorn 健康检查。
+- 前端完成 pnpm 锁文件安装、ESLint、Vitest 和生产构建。
+
+Stage 0 的功能、兼容性、媒体、Linux 环境和远程 CI 门槛均已满足。
 
 ## GitHub 协作项
 
