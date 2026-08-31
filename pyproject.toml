@@ -1,0 +1,77 @@
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "evistream"
+version = "0.1.0.dev0"
+description = "Evidence-grounded investigation agent for long-form video moderation."
+readme = "README.md"
+requires-python = ">=3.11,<3.12"
+license = { file = "LICENSE" }
+authors = [{ name = "linlin-is-me", email = "2155153179@qq.com" }]
+keywords = ["ai-agent", "video-understanding", "multimodal", "content-moderation"]
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3.11",
+]
+dependencies = [
+  "fastapi>=0.115,<1",
+  "httpx>=0.28,<1",
+  "openai>=1.60,<3",
+  "pydantic>=2.10,<3",
+  "pydantic-settings>=2.7,<3",
+  "python-dotenv>=1,<2",
+  "PyYAML>=6,<7",
+  "typer>=0.15,<1",
+  "uvicorn[standard]>=0.34,<1",
+]
+
+[project.optional-dependencies]
+asr = ["faster-whisper>=1.1,<2"]
+dev = [
+  "mypy>=1.15,<2",
+  "pytest>=8,<10",
+  "pytest-asyncio>=0.25,<2",
+  "pytest-cov>=6,<8",
+  "ruff>=0.11,<1",
+  "types-PyYAML>=6,<7",
+]
+
+[project.scripts]
+evistream = "evistream.cli:app"
+
+[project.urls]
+Homepage = "https://github.com/linlin-is-me/EviStream"
+Repository = "https://github.com/linlin-is-me/EviStream.git"
+Issues = "https://github.com/linlin-is-me/EviStream/issues"
+
+[tool.setuptools.packages.find]
+include = ["evistream*", "apps*"]
+
+[tool.pytest.ini_options]
+addopts = "-ra --strict-markers --cov=evistream --cov-report=term-missing --cov-fail-under=80"
+testpaths = ["tests"]
+markers = [
+  "integration: uses a local process or installed system executable",
+  "external: calls an external service or downloads a model",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_unused_configs = true
+plugins = ["pydantic.mypy"]
+exclude = ["apps/web"]
+
+[[tool.mypy.overrides]]
+module = ["faster_whisper"]
+ignore_missing_imports = true

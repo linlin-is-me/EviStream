@@ -1,0 +1,17 @@
+{
+  "data": {
+    "ok": true,
+    "summary": "stage0"
+  },
+  "actual_model": "qwen3.8-flash",
+  "usage": {
+    "prompt_tokens": 80,
+    "completion_tokens": 79,
+    "total_tokens": 159
+  },
+  "latency_ms": 2405,
+  "finish_reason": "stop",
+  "provider_request_id": "chatcmpl-dae78eca-469c-9d81-b020-a9437d9a2dae",
+  "verified_at": "2026-08-31",
+  "profile": "dashscope-test"
+}

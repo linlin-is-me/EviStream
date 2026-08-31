@@ -1,0 +1,20 @@
+name: dashscope-test
+gateway: openai_compatible
+base_url_env: EVISTREAM_MODEL_BASE_URL
+api_key_env: EVISTREAM_MODEL_API_KEY
+models:
+  agent_env: EVISTREAM_AGENT_MODEL
+  triage_env: EVISTREAM_TRIAGE_MODEL
+  verifier_env: EVISTREAM_VERIFY_MODEL
+  judge_env: EVISTREAM_JUDGE_MODEL
+defaults:
+  temperature: 0
+  timeout_seconds: 30
+  structured_output: true
+  max_attempts: 2
+capabilities:
+  text: true
+  image: true
+  video: true
+  structured_output: true
+
