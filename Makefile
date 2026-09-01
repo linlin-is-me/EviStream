@@ -1,4 +1,4 @@
-.PHONY: doctor dev-infra dev-infra-down migrate verify-stage1 verify-stage2
+.PHONY: doctor dev-infra dev-infra-down migrate verify-stage1 verify-stage2 verify-stage3
 
 PYTHON ?= python3.11
 
@@ -24,4 +24,10 @@ verify-stage2:
 	evistream policy-validate configs/policies/dangerous-behavior-v1.yaml
 	evistream policy-validate configs/policies/tobacco-alcohol-v1.yaml
 	evistream seed-demo --check
+	pytest
+
+verify-stage3:
+	alembic upgrade head
+	$(PYTHON) scripts/verify_stage3_migrations.py
+	evistream embedding-smoke --profile mock
 	pytest
