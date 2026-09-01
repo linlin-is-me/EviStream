@@ -1,5 +1,10 @@
 # Evidence model
 
+Stage 5 introduces `EvidenceStore` as the only application-level append path. It validates Case,
+Requirement, Artifact, ToolRun, ModelCall, modality, and time ownership before aggregation.
+Replay-derived rows retain `origin_evidence_id` and `replay_item_id`; immutable lineage records
+state whether an input was reused, invalidated, or recreated.
+
 Stage 2 establishes the persistence contracts used by later investigation and governance
 stages. Stage 4 appends provenance-checked Evidence but still does not aggregate evidence or
 produce formal moderation decisions.

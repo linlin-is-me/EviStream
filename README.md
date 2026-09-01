@@ -3,7 +3,8 @@
 EviStream is an evidence-grounded investigation agent for long-form video moderation.
 The repository contains the provider-neutral foundation, PostgreSQL-backed media
 pipeline, versioned moderation policies, hybrid retrieval and a uniform video-tool layer.
-Stage 4 adds a checkpointed investigation loop with audited model and tool calls.
+Stage 4 adds a checkpointed investigation loop with audited model and tool calls. Stage 5 turns
+its Evidence into formal decisions, human governance records, and selective policy replay.
 
 ## Development quick start
 
@@ -29,6 +30,7 @@ python -m pip install -e ".[dev,asr,ocr]"
 evistream media-ingest tests/fixtures/media/stage0_sample.mp4 --process
 evistream seed-demo --check
 make verify-stage4
+make verify-stage5
 ```
 
 In another terminal:
@@ -101,8 +103,8 @@ Case to `INVESTIGATED`; incomplete or conflicting evidence moves it to
 
 ## Project boundaries
 
-Stage 4 stops at provisional investigation results. Evidence aggregation, deterministic rule
-evaluation, Redis/RQ queues, Case HTTP APIs and review pages remain later stages. See
+Stage 5 ends at CLI-driven governance and inline replay. Redis/RQ queues, Case HTTP APIs,
+review pages, authentication, and formal evaluation data remain later stages. See
 [`EviStream开发文档.md`](EviStream开发文档.md) for the complete architecture and roadmap.
 
 ## License

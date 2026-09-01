@@ -7,6 +7,10 @@ follow Semantic Versioning.
 
 ### Added
 
+- Stage 5 Evidence aggregation, three-valued rule evaluation, and formal machine Decisions.
+- Append-only human Reviews, Appeals, Case timelines, and current audit pointers.
+- Policy diff, selective reevaluation or reinvestigation, replay lineage, and replay CLI commands.
+- `verify-stage5` migration, governance, replay, static-analysis, and coverage gate.
 - Stage 4 Agent runs, immutable steps, audited model calls and optimistic checkpoints.
 - Runtime-owned Plan, Retrieve, Inspect, Verify, Challenge and Decide transitions.
 - `investigate`, `investigation-status` and `investigation-trace` CLI commands.
