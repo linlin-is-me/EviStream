@@ -1,0 +1,65 @@
+PlanOutput:
+  - hypothesis:
+      requirement_id: req_stage4_cross_segment
+      statement: Inspect the first segment
+      confidence: 0.8
+    action:
+      requirement_id: req_stage4_cross_segment
+      tool_name: search_transcript
+      query: weapon
+      start_ms: null
+      end_ms: null
+      limit: 5
+      rationale: Controlled first retrieval
+  - hypothesis:
+      requirement_id: req_stage4_cross_segment
+      statement: Inspect the later threat segment
+      confidence: 0.9
+    action:
+      requirement_id: req_stage4_cross_segment
+      tool_name: search_transcript
+      query: threat
+      start_ms: null
+      end_ms: null
+      limit: 5
+      rationale: Controlled second retrieval
+InspectionObservation:
+  - source_ref: search_document:doc_stage4_cross_one
+    summary: Controlled observation from the first interval
+    visible_entities: [weapon]
+    uncertainty: 0.1
+  - source_ref: search_document:doc_stage4_cross_two
+    summary: Controlled observation from the later interval
+    visible_entities: [threat]
+    uncertainty: 0.1
+VerificationOutput:
+  - evidence:
+      - source_ref: search_document:doc_stage4_cross_one
+        stance: support
+        start_ms: 0
+        end_ms: 7720
+        summary: Controlled first support item
+        confidence: 0.85
+  - evidence:
+      - source_ref: search_document:doc_stage4_cross_two
+        stance: support
+        start_ms: 18300
+        end_ms: 30000
+        summary: Controlled later support item
+        confidence: 0.9
+ChallengeOutput:
+  - actions: []
+    unresolved_exception: false
+    contradictory_evidence: false
+    continue_investigation: true
+    rationale: A later interval remains to be checked
+  - actions: []
+    unresolved_exception: false
+    contradictory_evidence: false
+    continue_investigation: false
+    rationale: Both controlled intervals were checked
+ProvisionalDecision:
+  - verdict: REJECT
+    reason_code: CONTROLLED_CROSS_SEGMENT
+    explanation: Controlled evidence spans two intervals
+    evidence_ids: [$ALL_EVIDENCE]

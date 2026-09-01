@@ -3,6 +3,7 @@
 EviStream is an evidence-grounded investigation agent for long-form video moderation.
 The repository contains the provider-neutral foundation, PostgreSQL-backed media
 pipeline, versioned moderation policies, hybrid retrieval and a uniform video-tool layer.
+Stage 4 adds a checkpointed investigation loop with audited model and tool calls.
 
 ## Development quick start
 
@@ -27,7 +28,7 @@ python -m pip install -e ".[dev,asr,ocr]"
 # EVISTREAM_VISION_BACKEND explicitly in .env.
 evistream media-ingest tests/fixtures/media/stage0_sample.mp4 --process
 evistream seed-demo --check
-make verify-stage3
+make verify-stage4
 ```
 
 In another terminal:
@@ -82,10 +83,26 @@ evistream tool-run search_transcript --case-id <case-id> --requirement-id <requi
 See [`docs/retrieval.md`](docs/retrieval.md) and
 [`docs/tool-protocol.md`](docs/tool-protocol.md) for the stable contracts.
 
+## Stage 4 investigation runtime
+
+Start or resume a Case-scoped investigation, then inspect its status and sanitized trace:
+
+```bash
+evistream investigate <case-id> --profile mock
+evistream investigation-status <run-id>
+evistream investigation-trace <run-id>
+```
+
+The runtime enforces node transitions, Requirement ownership, tool capabilities, budgets,
+evidence provenance and optimistic checkpoints. A provisional approval or rejection moves the
+Case to `INVESTIGATED`; incomplete or conflicting evidence moves it to
+`NEEDS_HUMAN_REVIEW`. Neither path writes a formal RequirementResult or Decision. See
+[`docs/agent-runtime.md`](docs/agent-runtime.md).
+
 ## Project boundaries
 
-Stage 3 stops at deterministic retrieval and media preparation. Evidence aggregation, rule
-evaluation, queues and the Agent investigation loop remain later stages. See
+Stage 4 stops at provisional investigation results. Evidence aggregation, deterministic rule
+evaluation, Redis/RQ queues, Case HTTP APIs and review pages remain later stages. See
 [`EviStream开发文档.md`](EviStream开发文档.md) for the complete architecture and roadmap.
 
 ## License

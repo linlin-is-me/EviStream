@@ -52,6 +52,13 @@ class Settings(BaseSettings):
     retrieval_candidate_limit: int = Field(default=100, ge=20, le=1000)
     retrieval_context_ms: int = Field(default=10_000, ge=0)
     tool_clip_max_seconds: int = Field(default=30, gt=0, le=300)
+    agent_max_iterations: int = Field(default=6, ge=1, le=50)
+    agent_max_vlm_calls: int = Field(default=8, ge=1, le=100)
+    agent_max_consecutive_tool_failures: int = Field(default=3, ge=1, le=20)
+    agent_max_stagnant_iterations: int = Field(default=2, ge=1, le=20)
+    agent_timeout_seconds: int = Field(default=300, ge=10, le=3600)
+    agent_job_lease_seconds: int = Field(default=120, ge=10, le=3600)
+    agent_inspection_frame_count: int = Field(default=4, ge=1, le=8)
 
     def model_environment(self) -> dict[str, str]:
         values = {

@@ -188,6 +188,11 @@ class ToolRunRecord(TimestampMixin, Base):
             ["requirements.id", "requirements.case_id"],
             ondelete="RESTRICT",
         ),
+        ForeignKeyConstraint(
+            ["run_id", "case_id"],
+            ["agent_runs.id", "agent_runs.case_id"],
+            ondelete="RESTRICT",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
@@ -220,6 +225,11 @@ class EvidenceRecord(TimestampMixin, Base):
         ),
         UniqueConstraint("id", "requirement_id"),
         UniqueConstraint("id", "case_id"),
+        ForeignKeyConstraint(
+            ["model_call_id", "case_id"],
+            ["model_calls.id", "model_calls.case_id"],
+            ondelete="RESTRICT",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
@@ -312,3 +322,114 @@ class DecisionEvidenceRecord(Base):
     decision_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     evidence_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     case_id: Mapped[str] = mapped_column(String(64))
+
+
+class AgentRunRecord(TimestampMixin, Base):
+    __tablename__ = "agent_runs"
+    __table_args__ = (
+        UniqueConstraint("id", "case_id"),
+        CheckConstraint(
+            "run_kind IN ('INVESTIGATION', 'MANUAL_TOOL')",
+            name="ck_agent_runs_kind",
+        ),
+        CheckConstraint(
+            "status IN ('PENDING', 'RUNNING', 'COMPLETED', "
+            "'NEEDS_HUMAN_REVIEW', 'FAILED', 'CANCELLED')",
+            name="ck_agent_runs_status",
+        ),
+        CheckConstraint(
+            "run_kind = 'MANUAL_TOOL' OR job_id IS NOT NULL",
+            name="ck_agent_runs_investigation_job",
+        ),
+        Index(
+            "uq_agent_runs_job_id",
+            "job_id",
+            unique=True,
+            postgresql_where=text("job_id IS NOT NULL"),
+        ),
+        Index(
+            "uq_agent_runs_investigation_case",
+            "case_id",
+            unique=True,
+            postgresql_where=text("run_kind = 'INVESTIGATION'"),
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    run_kind: Mapped[str] = mapped_column(String(24), index=True)
+    job_id: Mapped[str | None] = mapped_column(
+        ForeignKey("processing_jobs.id", ondelete="RESTRICT"), index=True
+    )
+    case_id: Mapped[str] = mapped_column(ForeignKey("cases.id", ondelete="RESTRICT"), index=True)
+    model_profile: Mapped[str] = mapped_column(String(128))
+    current_node: Mapped[str | None] = mapped_column(String(24))
+    next_node: Mapped[str | None] = mapped_column(String(24))
+    state_snapshot: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    state_version: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[str] = mapped_column(String(32), index=True)
+    iteration: Mapped[int] = mapped_column(Integer, default=0)
+    vlm_calls: Mapped[int] = mapped_column(Integer, default=0)
+    consecutive_tool_failures: Mapped[int] = mapped_column(Integer, default=0)
+    total_tool_failures: Mapped[int] = mapped_column(Integer, default=0)
+    stagnant_iterations: Mapped[int] = mapped_column(Integer, default=0)
+    deadline_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_checkpoint_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    provisional_verdict: Mapped[str | None] = mapped_column(String(32))
+    stop_reason: Mapped[str | None] = mapped_column(String(64))
+    result_payload: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+
+
+class AgentStepRecord(Base):
+    __tablename__ = "agent_steps"
+    __table_args__ = (UniqueConstraint("run_id", "state_version"),)
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    run_id: Mapped[str] = mapped_column(ForeignKey("agent_runs.id", ondelete="CASCADE"), index=True)
+    node: Mapped[str] = mapped_column(String(24), index=True)
+    iteration: Mapped[int] = mapped_column(Integer)
+    state_version: Mapped[int] = mapped_column(Integer)
+    input_payload: Mapped[dict[str, Any]] = mapped_column(JSON)
+    output_payload: Mapped[dict[str, Any]] = mapped_column(JSON)
+    latency_ms: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[str] = mapped_column(String(16))
+    error_code: Mapped[str | None] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class ModelCallRecord(TimestampMixin, Base):
+    __tablename__ = "model_calls"
+    __table_args__ = (
+        UniqueConstraint("id", "case_id"),
+        Index("uq_model_calls_run_request", "run_id", "request_key", unique=True),
+        ForeignKeyConstraint(
+            ["run_id", "case_id"],
+            ["agent_runs.id", "agent_runs.case_id"],
+            ondelete="RESTRICT",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    job_id: Mapped[str | None] = mapped_column(
+        ForeignKey("processing_jobs.id", ondelete="RESTRICT"), index=True
+    )
+    run_id: Mapped[str] = mapped_column(String(64), index=True)
+    case_id: Mapped[str] = mapped_column(String(64), index=True)
+    node: Mapped[str] = mapped_column(String(24), index=True)
+    state_version: Mapped[int] = mapped_column(Integer)
+    role: Mapped[str] = mapped_column(String(24))
+    profile: Mapped[str] = mapped_column(String(128))
+    requested_model: Mapped[str] = mapped_column(String(255))
+    actual_model: Mapped[str | None] = mapped_column(String(255))
+    request_key: Mapped[str] = mapped_column(String(64))
+    request_summary: Mapped[dict[str, Any]] = mapped_column(JSON)
+    response_payload: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    status: Mapped[str] = mapped_column(String(16), index=True)
+    attempt: Mapped[int] = mapped_column(Integer, default=1)
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    prompt_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    completion_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    total_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    latency_ms: Mapped[int] = mapped_column(Integer, default=0)
+    provider_request_id: Mapped[str | None] = mapped_column(String(255))
+    error_code: Mapped[str | None] = mapped_column(String(64))
