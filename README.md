@@ -6,18 +6,25 @@ pipeline, versioned moderation policies, hybrid retrieval and a uniform video-to
 
 ## Development quick start
 
-```powershell
-conda activate evistream_env
-python -m pip install -e ".[dev,asr]"
-Copy-Item .env.example .env
+The supported development route is Ubuntu under WSL2 or native Linux. Keep the virtual
+environment outside the repository:
+
+```bash
+python3.11 -m venv ../.venvs/evistream
+source ../.venvs/evistream/bin/activate
+python -m pip install -e ".[dev]"
+cp .env.example .env
+make dev-infra
+make migrate
 uvicorn apps.api.main:app --reload
 ```
 
-Start the Stage 1 database and migrate it from WSL2 or Linux:
+Install the real local media backends only when they are needed:
 
 ```bash
-make dev-infra
-make migrate
+python -m pip install -e ".[dev,asr,ocr]"
+# Set EVISTREAM_ASR_BACKEND, EVISTREAM_OCR_BACKEND and
+# EVISTREAM_VISION_BACKEND explicitly in .env.
 evistream media-ingest tests/fixtures/media/stage0_sample.mp4 --process
 evistream seed-demo --check
 make verify-stage3
@@ -25,7 +32,7 @@ make verify-stage3
 
 In another terminal:
 
-```powershell
+```bash
 pnpm --dir apps/web install
 pnpm --dir apps/web dev
 ```
@@ -44,7 +51,7 @@ make doctor
 The doctor checks Python 3.11, Node 24, pnpm, FFmpeg, Docker Engine, Docker Compose,
 and the safe configuration files without printing credential values.
 
-```powershell
+```bash
 evistream run-demo-job --message stage0
 evistream probe-video tests/fixtures/media/stage0_sample.mp4
 evistream model-smoke --profile mock
@@ -55,7 +62,9 @@ pnpm --dir apps/web test -- --run
 pnpm --dir apps/web build
 ```
 
-Real model credentials belong only in `.env`. CI always uses the Mock Gateway.
+Real model credentials belong only in `.env`. CI and the offline stage gates always use
+Mock adapters. Selecting a real backend with a missing package, model profile or credential
+fails with `MEDIA_ADAPTER_UNAVAILABLE`; it never falls back to Mock.
 The current verification state is recorded in
 [`docs/stage-0-report.md`](docs/stage-0-report.md).
 
@@ -75,8 +84,8 @@ See [`docs/retrieval.md`](docs/retrieval.md) and
 
 ## Project boundaries
 
-Stage 3 stops at deterministic retrieval and media preparation. VLM inspection, Evidence
-aggregation, rule evaluation, queues and the Agent investigation loop remain later stages. See
+Stage 3 stops at deterministic retrieval and media preparation. Evidence aggregation, rule
+evaluation, queues and the Agent investigation loop remain later stages. See
 [`EviStream开发文档.md`](EviStream开发文档.md) for the complete architecture and roadmap.
 
 ## License

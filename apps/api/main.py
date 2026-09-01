@@ -9,12 +9,8 @@ from pydantic import BaseModel
 
 from evistream import __version__
 from evistream.config import Settings, get_settings
-from evistream.media.asr import MockASR
-from evistream.media.extractors import MockOCR, MockVisualDescription
-from evistream.media.service import MediaApplicationService
+from evistream.media.runtime import MediaAdapterUnavailable, MediaRuntime, build_media_runtime
 from evistream.media.types import MediaJob, SegmentBoundary, Video
-from evistream.storage.artifacts import LocalArtifactStore
-from evistream.storage.database import Database
 
 
 class HealthResponse(BaseModel):
@@ -27,13 +23,20 @@ class HealthResponse(BaseModel):
 def create_app(settings: Settings | None = None) -> FastAPI:
     runtime_settings = settings or get_settings()
     application = FastAPI(title="EviStream API", version=__version__)
+    media_runtime: MediaRuntime | None = None
+
+    def get_media_runtime() -> MediaRuntime:
+        nonlocal media_runtime
+        if media_runtime is None:
+            media_runtime = build_media_runtime(runtime_settings)
+        return media_runtime
 
     if runtime_settings.cors_origins:
         application.add_middleware(
             CORSMiddleware,
             allow_origins=runtime_settings.cors_origins,
             allow_credentials=False,
-            allow_methods=["GET"],
+            allow_methods=["GET", "POST"],
             allow_headers=["*"],
         )
 
@@ -46,16 +49,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             mode=runtime_settings.environment,
         )
 
-    def media_service() -> MediaApplicationService:
-        return MediaApplicationService(
-            Database(runtime_settings.database_url),
-            LocalArtifactStore(runtime_settings.artifact_root),
-            runtime_settings,
-            MockASR(),
-            MockOCR(),
-            MockVisualDescription(),
-        )
-
     @application.post("/api/v1/videos", response_model=Video, status_code=202)
     async def upload_video(
         file: UploadFile,
@@ -65,13 +58,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             with NamedTemporaryFile(suffix=suffix, delete=False) as temporary:
                 temporary_path = Path(temporary.name)
+                total_bytes = 0
                 while chunk := await file.read(1024 * 1024):
+                    total_bytes += len(chunk)
+                    if total_bytes > runtime_settings.upload_max_bytes:
+                        raise ValueError("uploaded file exceeds configured limit")
                     temporary.write(chunk)
-            service = media_service()
-            video, job = service.register_file(temporary_path, file.filename)
-            background_tasks.add_task(service.process_job, job.job_id)
+            runtime = get_media_runtime()
+            video, job = runtime.service.register_file(temporary_path, file.filename)
+            request = runtime.service.build_job_request(job.job_id)
+            background_tasks.add_task(runtime.dispatcher.dispatch, request)
             return video
-        except (ValueError, RuntimeError) as error:
+        except (MediaAdapterUnavailable, ValueError, RuntimeError) as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
         finally:
             if "temporary_path" in locals():
@@ -80,14 +78,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @application.get("/api/v1/videos/{video_id}", response_model=Video)
     async def get_video(video_id: str) -> Video:
         try:
-            return media_service().get_video(video_id)
+            return get_media_runtime().service.get_video(video_id)
         except LookupError as error:
             raise HTTPException(status_code=404, detail="video not found") from error
 
     @application.get("/api/v1/jobs/{job_id}", response_model=MediaJob)
     async def get_job(job_id: str) -> MediaJob:
         try:
-            return media_service().get_job(job_id)
+            return get_media_runtime().service.get_job(job_id)
         except LookupError as error:
             raise HTTPException(status_code=404, detail="job not found") from error
 
@@ -97,7 +95,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     async def simulate_stream(video_id: str) -> list[SegmentBoundary]:
         try:
-            return media_service().simulate_stream(video_id)
+            return get_media_runtime().service.simulate_stream(video_id)
         except LookupError as error:
             raise HTTPException(status_code=404, detail="video not found") from error
 

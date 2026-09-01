@@ -1,10 +1,13 @@
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from typer.testing import CliRunner
 
 from evistream.cli import app
 from evistream.media.probe import MediaProbeResult
+from evistream.models import MockEmbeddingGateway
+from evistream.models.profiles import ResolvedEmbeddingProfile
+from evistream.retrieval import IndexFailure, IndexSummary
 
 runner = CliRunner()
 
@@ -63,3 +66,51 @@ def test_probe_cli_outputs_normalized_json(tmp_path: Path) -> None:
 
     assert result.exit_code == 0
     assert '"duration_ms": 30000' in result.stdout
+
+
+def test_retrieval_index_returns_nonzero_for_partial_indexing() -> None:
+    profile = ResolvedEmbeddingProfile(
+        name="mock",
+        gateway="mock",
+        base_url=None,
+        api_key=None,
+        model="mock-embedding-v1",
+        dimensions=1536,
+        batch_size=10,
+        timeout_seconds=5,
+        max_attempts=1,
+    )
+    summary = IndexSummary(
+        status="partial",
+        error_code="EMBEDDING_INDEX_PARTIAL",
+        video_id="video",
+        total=2,
+        indexed=1,
+        skipped=0,
+        failed=1,
+        actual_model="mock-embedding-v1",
+        embedding_space="space",
+        dimensions=1536,
+        prompt_tokens=2,
+        failures=[
+            IndexFailure(
+                batch_index=1,
+                document_ids=["doc-2"],
+                error_code="MODEL_UNAVAILABLE",
+                retryable=True,
+            )
+        ],
+    )
+    with (
+        patch(
+            "evistream.cli.resolve_embedding_gateway",
+            return_value=(MockEmbeddingGateway(), profile),
+        ),
+        patch("evistream.cli.EmbeddingIndexService") as service,
+    ):
+        service.return_value.index_video = AsyncMock(return_value=summary)
+        result = runner.invoke(app, ["retrieval-index", "video", "--profile", "mock"])
+
+    assert result.exit_code == 1
+    assert '"status": "partial"' in result.stdout
+    assert "EMBEDDING_INDEX_PARTIAL" in result.stdout

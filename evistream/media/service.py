@@ -1,14 +1,15 @@
 """Stage 1 media registration and preprocessing application services."""
 
+from datetime import timedelta
 from hashlib import sha256
 from pathlib import Path
 from uuid import uuid4
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 
-from evistream.application.types import JobStatus
+from evistream.application.types import JobHandlerError, JobRequest, JobStatus
 from evistream.config import Settings
-from evistream.media.asr.types import ASRAdapter, ASRRequest
+from evistream.media.asr.types import ASRAdapter, ASRRequest, ASRResponse
 from evistream.media.extractors import OCRAdapter, VisualDescriptionAdapter
 from evistream.media.probe import probe_video
 from evistream.media.segmenter import FFmpegSceneSegmenter, FixedWindowSegmenter, extract_keyframe
@@ -50,6 +51,18 @@ class MediaApplicationService:
             raise FileNotFoundError(resolved)
         if resolved.stat().st_size > self.settings.upload_max_bytes:
             raise ValueError("uploaded file exceeds configured limit")
+        metadata = probe_video(
+            resolved,
+            ffprobe_binary=self.settings.ffprobe_binary,
+            timeout_seconds=self.settings.process_timeout_seconds,
+        )
+        if metadata.duration_ms > self.settings.video_max_duration_seconds * 1000:
+            raise ValueError("video duration exceeds configured limit")
+        if (
+            metadata.width > self.settings.video_max_width
+            or metadata.height > self.settings.video_max_height
+        ):
+            raise ValueError("video resolution exceeds configured limit")
         fingerprint = _sha256_file(resolved)
         with self.database.session() as session:
             existing = session.scalar(
@@ -69,14 +82,6 @@ class MediaApplicationService:
         video_id = f"vid_{uuid4().hex}"
         suffix = resolved.suffix.lower() or ".bin"
         uri = self.artifacts.put_file(resolved, f"videos/{video_id}/source{suffix}")
-        stored_path = self.artifacts.resolve(uri)
-        metadata = probe_video(
-            stored_path,
-            ffprobe_binary=self.settings.ffprobe_binary,
-            timeout_seconds=self.settings.process_timeout_seconds,
-        )
-        if metadata.duration_ms > self.settings.video_max_duration_seconds * 1000:
-            raise ValueError("video duration exceeds configured limit")
         request_key = sha256(f"MEDIA_PREPROCESS:{fingerprint}".encode()).hexdigest()
         now = utc_now()
         video_record = VideoRecord(
@@ -126,6 +131,19 @@ class MediaApplicationService:
             )
         return _video(video_record), _job(job_record)
 
+    def build_job_request(self, job_id: str) -> JobRequest:
+        with self.database.session() as session:
+            record = session.get(ProcessingJobRecord, job_id)
+            if record is None:
+                raise LookupError(job_id)
+            return JobRequest(
+                job_id=record.id,
+                job_type=record.type,
+                request_key=record.request_key,
+                correlation_id=record.correlation_id,
+                payload={"video_id": record.subject_id},
+            )
+
     def process_job(self, job_id: str) -> MediaJob:
         with self.database.session() as session:
             job = session.get(ProcessingJobRecord, job_id)
@@ -133,17 +151,42 @@ class MediaApplicationService:
                 raise LookupError(job_id)
             if job.status == JobStatus.SUCCEEDED:
                 return _job(job)
-            video = session.get(VideoRecord, job.subject_id)
+            if job.status == JobStatus.RUNNING:
+                raise JobHandlerError("JOB_ALREADY_RUNNING", f"job is already running: {job_id}")
+            if (
+                job.status in {JobStatus.FAILED, JobStatus.CANCELLED}
+                or job.attempt >= job.max_attempts
+            ):
+                raise JobHandlerError("JOB_NOT_RETRYABLE", f"job cannot be retried: {job_id}")
+            now = utc_now()
+            claimed = session.execute(
+                update(ProcessingJobRecord)
+                .where(
+                    ProcessingJobRecord.id == job_id,
+                    ProcessingJobRecord.status.in_([JobStatus.PENDING, JobStatus.RETRY_WAIT]),
+                    ProcessingJobRecord.attempt < ProcessingJobRecord.max_attempts,
+                )
+                .values(
+                    status=JobStatus.RUNNING,
+                    attempt=ProcessingJobRecord.attempt + 1,
+                    started_at=now,
+                    finished_at=None,
+                    error_code=None,
+                    lease_until=now + timedelta(seconds=self.settings.media_job_lease_seconds),
+                    updated_at=now,
+                )
+                .returning(ProcessingJobRecord.subject_id)
+            ).scalar_one_or_none()
+            if claimed is None:
+                raise JobHandlerError("JOB_ALREADY_RUNNING", f"job was claimed: {job_id}")
+            video = session.get(VideoRecord, claimed)
             if video is None:
-                raise LookupError(job.subject_id)
-            job.status = JobStatus.RUNNING
-            job.attempt += 1
-            job.started_at = utc_now()
+                raise LookupError(claimed)
             video.status = VideoStatus.PROCESSING
             source_path = self.artifacts.resolve(video.artifact_uri)
 
         try:
-            self._extract(video.id, source_path, video.duration_ms)
+            self._extract(video.id, source_path, video.duration_ms, video.has_audio)
         except Exception:
             with self.database.session() as session:
                 failed_job = session.get(ProcessingJobRecord, job_id)
@@ -152,6 +195,7 @@ class MediaApplicationService:
                     failed_job.status = JobStatus.FAILED
                     failed_job.error_code = "MEDIA_DECODE_FAILED"
                     failed_job.finished_at = utc_now()
+                    failed_job.lease_until = None
                 if failed_video is not None:
                     failed_video.status = VideoStatus.FAILED
             raise
@@ -163,6 +207,7 @@ class MediaApplicationService:
                 raise RuntimeError("media state disappeared")
             completed_job.status = JobStatus.SUCCEEDED
             completed_job.finished_at = utc_now()
+            completed_job.lease_until = None
             completed_video.status = VideoStatus.READY
             return _job(completed_job)
 
@@ -186,7 +231,7 @@ class MediaApplicationService:
             self.settings.simulated_stream_segment_seconds * 1000
         ).segment(video.duration_ms)
 
-    def _extract(self, video_id: str, source: Path, duration_ms: int) -> None:
+    def _extract(self, video_id: str, source: Path, duration_ms: int, has_audio: bool) -> None:
         segmenter = FFmpegSceneSegmenter(self.settings.ffmpeg_binary, self.settings.scene_threshold)
         boundaries = segmenter.segment(source, duration_ms, self.settings.process_timeout_seconds)
         now = utc_now()
@@ -268,7 +313,16 @@ class MediaApplicationService:
                         )
                     )
 
-            transcript = self.asr.transcribe(ASRRequest(media_path=source))
+            transcript = (
+                self.asr.transcribe(ASRRequest(media_path=source))
+                if has_audio
+                else ASRResponse(
+                    segments=[],
+                    language=None,
+                    model="none",
+                    duration_ms=duration_ms,
+                )
+            )
             transcript_artifact = ArtifactRecord(
                 id=f"art_{uuid4().hex}",
                 video_id=video_id,

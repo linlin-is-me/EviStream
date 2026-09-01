@@ -71,7 +71,10 @@ class GatewayVisualDescription:
                     role="user",
                     content=(
                         "Describe the visible objects, actions and uncertainty. "
-                        "Return structured JSON."
+                        "Return exactly one JSON object, not an array, with this shape: "
+                        '{"description":"...","objects":["..."],'
+                        '"actions":["..."],"uncertainty":null}. '
+                        "Use a string or null for uncertainty."
                     ),
                 )
             ],
@@ -93,7 +96,12 @@ class PaddleOCRAdapter:
             from paddleocr import PaddleOCR
         except ImportError as error:
             raise RuntimeError("PaddleOCR is not installed") from error
-        self._engine = PaddleOCR(use_doc_orientation_classify=False, lang=language)
+        self._engine = PaddleOCR(
+            use_doc_orientation_classify=False,
+            use_doc_unwarping=False,
+            use_textline_orientation=False,
+            lang=language,
+        )
 
     def extract(self, image: Path) -> list[TextObservation]:
         if not image.is_file():

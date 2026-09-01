@@ -62,6 +62,9 @@ Token、输出 79 Token，总计 159 Token。完整的非敏感响应元数据�
 
 Stage 0 的功能、兼容性、媒体、Linux 环境和远程 CI 门槛均已满足。
 
+2026-09-01 的 Stage 0–3 收口同步修订了 README 的 Linux/WSL2 环境说明，并扩充第三方
+声明，使其覆盖数据库、检索、OCR 和 ASR 的后续依赖。Stage 0 接口与验收结论不变。
+
 ## GitHub 协作项
 
 - [M0 Foundation](https://github.com/linlin-is-me/EviStream/milestone/1)

@@ -35,7 +35,7 @@ dependencies = [
 
 [project.optional-dependencies]
 asr = ["faster-whisper>=1.1,<2"]
-ocr = ["paddleocr>=3,<4"]
+ocr = ["paddleocr>=3,<4", "paddlepaddle==3.2.0"]
 dev = [
   "mypy>=1.15,<2",
   "pytest>=8,<10",
