@@ -10,7 +10,12 @@ from sqlalchemy import select
 
 from evistream.retrieval.text import normalize_text
 from evistream.storage.database import Database, utc_now
-from evistream.storage.models import CaseRecord, RequirementRecord, ToolRunRecord
+from evistream.storage.models import (
+    AgentRunRecord,
+    CaseRecord,
+    RequirementRecord,
+    ToolRunRecord,
+)
 from evistream.tools.registry import ToolRegistry
 from evistream.tools.types import ToolRequest, ToolResult
 
@@ -39,6 +44,7 @@ class ToolExecutor:
         error = self._validate(tool_name, request, key)
         if error is not None:
             return error
+        self._ensure_run(request)
         with self.database.session() as session:
             existing = session.scalar(
                 select(ToolRunRecord).where(
@@ -112,7 +118,52 @@ class ToolExecutor:
             record.estimated_cost = result.estimated_cost
             record.error_code = result.error_code
             record.updated_at = utc_now()
+            run = session.get(AgentRunRecord, request.run_id)
+            if run is not None and run.run_kind == "MANUAL_TOOL":
+                run.status = "COMPLETED"
+                run.stop_reason = "MANUAL_TOOL"
+                run.result_payload = {"last_tool_run_id": tool_run_id}
+                run.updated_at = utc_now()
         return result
+
+    def _ensure_run(self, request: ToolRequest) -> None:
+        with self.database.session() as session:
+            existing = session.get(AgentRunRecord, request.run_id)
+            if existing is not None:
+                if existing.case_id != request.case_id:
+                    raise ValueError("tool run ID belongs to another case")
+                return
+            case = session.get(CaseRecord, request.case_id)
+            if case is None:
+                raise LookupError(request.case_id)
+            now = utc_now()
+            session.add(
+                AgentRunRecord(
+                    id=request.run_id,
+                    run_kind="MANUAL_TOOL",
+                    job_id=None,
+                    case_id=request.case_id,
+                    model_profile=case.model_profile,
+                    current_node=None,
+                    next_node=None,
+                    state_snapshot={},
+                    state_version=0,
+                    status="RUNNING",
+                    iteration=0,
+                    vlm_calls=0,
+                    consecutive_tool_failures=0,
+                    total_tool_failures=0,
+                    stagnant_iterations=0,
+                    deadline_at=None,
+                    last_checkpoint_at=now,
+                    lease_until=None,
+                    provisional_verdict=None,
+                    stop_reason=None,
+                    result_payload=None,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
 
     def _validate(
         self, tool_name: str, request: ToolRequest, request_key: str
