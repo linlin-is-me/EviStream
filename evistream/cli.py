@@ -26,6 +26,7 @@ from evistream.governance.review import HumanGovernanceService
 from evistream.governance.runtime import build_governance_runtime
 from evistream.governance.service import GovernanceApplicationService
 from evistream.governance.timeline import CaseTimelineService
+from evistream.jobs.runtime import requeue_due
 from evistream.media.asr import ASRAdapter, ASRRequest, FasterWhisperASR, MockASR
 from evistream.media.probe import MediaProbeError, probe_video
 from evistream.media.runtime import MediaAdapterUnavailable, build_media_runtime
@@ -56,6 +57,32 @@ app = typer.Typer(no_args_is_help=True, help="EviStream verification and develop
 class SmokeOutput(BaseModel):
     ok: bool
     summary: str
+
+
+@app.command("jobs-requeue")
+def jobs_requeue(
+    due_only: Annotated[bool, typer.Option(help="Only enqueue due jobs.")] = True,
+) -> None:
+    settings = _load_settings()
+    try:
+        count = requeue_due(settings, due_only=due_only)
+    except Exception as error:
+        _fail("QUEUE_UNAVAILABLE", str(error))
+    typer.echo(json.dumps({"enqueued": count}, indent=2))
+
+
+@app.command("worker")
+def worker() -> None:
+    settings = _load_settings()
+    requeue_due(settings)
+    from redis import Redis
+    from rq import Queue, Worker
+
+    connection = Redis.from_url(settings.redis_url)
+    queue = Queue(settings.rq_queue, connection=connection)
+    Worker([queue], connection=connection, name="evistream-worker").work(
+        with_scheduler=True
+    )
 
 
 @app.command("run-demo-job")

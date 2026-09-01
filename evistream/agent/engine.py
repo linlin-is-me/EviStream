@@ -79,7 +79,9 @@ class InvestigationEngine:
                     raise AgentRuntimeError(
                         "AGENT_TRANSITION_INVALID", f"unknown node: {node}"
                     )
-            except ModelError:
+            except ModelError as error:
+                if error.retryable:
+                    raise
                 return self.service.complete(
                     state,
                     self._review_decision(state, "AGENT_MODEL_FAILED"),

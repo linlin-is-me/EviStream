@@ -94,6 +94,11 @@ class ReplayApplicationService:
                     status=JobStatus.PENDING,
                     attempt=0,
                     max_attempts=3,
+                    payload={
+                        "replay_job_id": replay_job_id,
+                        "model_profile": model_profile,
+                    },
+                    retryable=False,
                     created_at=now,
                     updated_at=now,
                 )
@@ -496,7 +501,8 @@ class ReplayApplicationService:
             job_type=job.type,
             request_key=job.request_key,
             correlation_id=job.correlation_id,
-            payload={"replay_job_id": replay.id},
+            payload=job.payload
+            or {"replay_job_id": replay.id, "model_profile": replay.model_profile},
         )
 
     @staticmethod
