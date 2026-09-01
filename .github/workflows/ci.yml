@@ -30,8 +30,18 @@ jobs:
           --health-interval 2s
           --health-timeout 3s
           --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 20
     env:
       EVISTREAM_DATABASE_URL: postgresql+psycopg://evistream:evistream@127.0.0.1:54329/evistream
+      EVISTREAM_REDIS_URL: redis://127.0.0.1:6379/0
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -54,8 +64,8 @@ jobs:
         run: mypy evistream apps
       - name: Check Linux toolchain
         run: make doctor
-      - name: Verify Stage 4
-        run: make verify-stage4 PYTHON=python
+      - name: Verify Stage 6
+        run: make verify-stage6 PYTHON=python
       - name: Start API and verify health
         shell: bash
         run: |
