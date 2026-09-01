@@ -7,6 +7,10 @@ follow Semantic Versioning.
 
 ### Added
 
+- Stage 4 Agent runs, immutable steps, audited model calls and optimistic checkpoints.
+- Runtime-owned Plan, Retrieve, Inspect, Verify, Challenge and Decide transitions.
+- `investigate`, `investigation-status` and `investigation-trace` CLI commands.
+- Deterministic three-path Agent fixtures and `verify-stage4` disposable-database gate.
 - Shared media runtime factory and `MEDIA_PREPROCESS` Job Handler for API, CLI and future RQ use.
 - Database enforcement for published-policy immutability and same-case evidence relationships.
 - Structured embedding index failures and isolated Stage 1–3 verification databases.
@@ -17,6 +21,8 @@ follow Semantic Versioning.
 
 ### Changed
 
+- ToolRun now binds to a same-Case AgentRun; Evidence model calls use a same-Case foreign key.
+- Case status now distinguishes provisional `INVESTIGATED` results from formal decisions.
 - Media jobs now use atomic claims, bounded upload reads and post-probe media limits.
 - Silent videos persist an empty transcript instead of failing ASR.
 - Partial and failed embedding-index commands now return a non-zero exit status.
