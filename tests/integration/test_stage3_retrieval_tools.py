@@ -6,6 +6,7 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import func, select
+from sqlalchemy import text as sql_text
 
 from evistream.config import Settings
 from evistream.models import EmbeddingRequest, EmbeddingResponse, MockEmbeddingGateway
@@ -50,6 +51,40 @@ class FailingEmbeddingGateway:
 
     async def embed(self, request: EmbeddingRequest) -> EmbeddingResponse:
         raise ModelError(ModelErrorCode.UNAVAILABLE, "offline", retryable=True)
+
+
+class PartiallyFailingEmbeddingGateway:
+    def __init__(self) -> None:
+        self.calls = 0
+        self.mock = MockEmbeddingGateway()
+
+    @property
+    def model_name(self) -> str:
+        return "partial"
+
+    async def embed(self, request: EmbeddingRequest) -> EmbeddingResponse:
+        self.calls += 1
+        if self.calls == 2:
+            raise ModelError(ModelErrorCode.UNAVAILABLE, "offline", retryable=True)
+        return await self.mock.embed(request)
+
+
+class SourceChangingEmbeddingGateway:
+    def __init__(self, database: Database, document_id: str) -> None:
+        self.database = database
+        self.document_id = document_id
+        self.mock = MockEmbeddingGateway()
+
+    @property
+    def model_name(self) -> str:
+        return "source-changing"
+
+    async def embed(self, request: EmbeddingRequest) -> EmbeddingResponse:
+        with self.database.session() as session:
+            record = session.get(SearchDocumentRecord, self.document_id)
+            assert record is not None
+            record.text = f"{record.text} changed"
+        return await self.mock.embed(request)
 
 
 @pytest.mark.integration
@@ -128,7 +163,17 @@ def test_stage3_hybrid_retrieval_tools_and_clip_reuse(tmp_path: Path) -> None:
             created_at=now,
             updated_at=now,
         )
-        session.add_all([transcript_artifact, vision_artifact])
+        ocr_artifact = ArtifactRecord(
+            id=f"art_ocr_{suffix}",
+            video_id=video_id,
+            segment_id=segment.id,
+            type="OCR",
+            uri=artifacts.write_text("ocr", f"videos/{video_id}/ocr/0.json"),
+            artifact_metadata={},
+            created_at=now,
+            updated_at=now,
+        )
+        session.add_all([transcript_artifact, vision_artifact, ocr_artifact])
         session.flush()
         for document_id, artifact, modality, start, end, text in [
             (
@@ -138,6 +183,30 @@ def test_stage3_hybrid_retrieval_tools_and_clip_reuse(tmp_path: Path) -> None:
                 1_000,
                 3_000,
                 "EviStream evidence retrieval verification",
+            ),
+            (
+                f"doc_transcript_weapon_{suffix}",
+                transcript_artifact,
+                "transcript",
+                5_000,
+                7_000,
+                "Weapon evidence context",
+            ),
+            (
+                f"doc_transcript_context_{suffix}",
+                transcript_artifact,
+                "transcript",
+                8_000,
+                9_000,
+                "Retrieval context explanation",
+            ),
+            (
+                f"doc_ocr_{suffix}",
+                ocr_artifact,
+                "ocr",
+                2_000,
+                3_500,
+                "WARNING EVIDENCE",
             ),
             (
                 f"doc_vision_{suffix}",
@@ -218,8 +287,10 @@ def test_stage3_hybrid_retrieval_tools_and_clip_reuse(tmp_path: Path) -> None:
     indexer = EmbeddingIndexService(database, gateway, profile)
     first = asyncio.run(indexer.index_video(video_id))
     second = asyncio.run(indexer.index_video(video_id))
-    assert first.indexed == 2
-    assert second.skipped == 2
+    forced = asyncio.run(indexer.index_video(video_id, force=True))
+    assert first.indexed == 5
+    assert second.skipped == 5
+    assert forced.indexed == 5
 
     retrieval = HybridRetrievalService(database, gateway, profile)
     result = asyncio.run(
@@ -237,6 +308,68 @@ def test_stage3_hybrid_retrieval_tools_and_clip_reuse(tmp_path: Path) -> None:
     assert result.hits[0].start_ms == 1_000
     assert result.hits[0].keyword_rank == 1
     assert result.hits[0].vector_rank == 1
+
+    fused = asyncio.run(
+        retrieval.search(
+            RetrievalRequest(
+                video_id=video_id,
+                query="evidence retrieval",
+                modalities=["transcript"],
+                limit=5,
+            )
+        )
+    )
+    assert len(fused.hits) >= 3
+    assert [hit.document_id for hit in fused.hits] == [
+        hit.document_id
+        for hit in sorted(fused.hits, key=lambda hit: (-hit.score, hit.document_id))
+    ]
+    for hit in fused.hits:
+        expected_score = sum(
+            1 / (60 + rank)
+            for rank in [hit.keyword_rank, hit.vector_rank]
+            if rank is not None
+        )
+        assert hit.score == pytest.approx(expected_score)
+
+    before_boundary = asyncio.run(
+        retrieval.search(
+            RetrievalRequest(
+                video_id=video_id,
+                query="evidence retrieval",
+                modalities=["transcript"],
+                start_ms=3_000,
+                end_ms=5_000,
+            )
+        )
+    )
+    crossing_boundary = asyncio.run(
+        retrieval.search(
+            RetrievalRequest(
+                video_id=video_id,
+                query="evidence retrieval",
+                modalities=["transcript"],
+                start_ms=2_999,
+                end_ms=3_001,
+            )
+        )
+    )
+    assert before_boundary.hits == []
+    assert crossing_boundary.hits[0].document_id == f"doc_transcript_{suffix}"
+
+    other_profile = profile.model_copy(update={"name": "mock-other-space"})
+    other_space = HybridRetrievalService(database, gateway, other_profile)
+    isolated = asyncio.run(
+        other_space.search(
+            RetrievalRequest(
+                video_id=video_id,
+                query="safety keyframe",
+                modalities=["vision"],
+            )
+        )
+    )
+    assert isolated.status == "success"
+    assert isolated.hits == []
 
     degraded = HybridRetrievalService(database, FailingEmbeddingGateway(), profile)
     degraded_text = asyncio.run(
@@ -318,11 +451,98 @@ def test_stage3_hybrid_retrieval_tools_and_clip_reuse(tmp_path: Path) -> None:
             update={"query": "", "start_ms": None, "end_ms": None}
         ),
     }
-    for tool_name, tool_request in requests.items():
-        assert asyncio.run(executor.execute(tool_name, tool_request)).status == "success"
+    tool_outputs = {
+        tool_name: asyncio.run(executor.execute(tool_name, tool_request))
+        for tool_name, tool_request in requests.items()
+    }
+    assert all(result.status == "success" for result in tool_outputs.values())
+    assert tool_outputs["search_ocr"].items[0].modality == "ocr"
+    assert tool_outputs["search_visual_caption"].items[0].modality == "vision"
+
+    degraded_executor = ToolExecutor(
+        database,
+        build_default_registry(database, artifacts, settings, degraded),
+    )
+    degraded_request = request.model_copy(update={"run_id": f"run_degraded_{suffix}"})
+    partial_tool = asyncio.run(
+        degraded_executor.execute(
+            "search_transcript",
+            degraded_request.model_copy(update={"start_ms": None, "end_ms": None}),
+        )
+    )
+    failed_tool = asyncio.run(
+        degraded_executor.execute(
+            "search_visual_caption",
+            degraded_request.model_copy(
+                update={
+                    "query": "safety keyframe",
+                    "start_ms": None,
+                    "end_ms": None,
+                }
+            ),
+        )
+    )
+    assert partial_tool.status == "partial"
+    assert failed_tool.status == "failed"
     with database.session() as session:
         assert session.scalar(
             select(func.count())
             .select_from(ToolRunRecord)
             .where(ToolRunRecord.run_id == request.run_id)
         ) == 8
+        persisted_statuses = set(
+            session.scalars(
+                select(ToolRunRecord.status).where(
+                    ToolRunRecord.run_id == degraded_request.run_id
+                )
+            ).all()
+        )
+        index_names = set(
+            session.execute(
+                sql_text(
+                    "SELECT indexname FROM pg_indexes "
+                    "WHERE tablename = 'search_documents'"
+                )
+            ).scalars()
+        )
+    assert persisted_statuses == {"partial", "failed"}
+    assert {
+        "ix_search_documents_search_vector",
+        "ix_search_documents_embedding_hnsw",
+    }.issubset(index_names)
+
+    failed_profile = profile.model_copy(update={"name": "failed-space"})
+    failed_summary = asyncio.run(
+        EmbeddingIndexService(
+            database, FailingEmbeddingGateway(), failed_profile
+        ).index_video(video_id)
+    )
+    assert failed_summary.status == "failed"
+    assert failed_summary.error_code == "EMBEDDING_INDEX_FAILED"
+    assert failed_summary.failures[0].error_code == "MODEL_UNAVAILABLE"
+
+    partial_profile = profile.model_copy(
+        update={"name": "partial-space", "batch_size": 1}
+    )
+    partial_summary = asyncio.run(
+        EmbeddingIndexService(
+            database, PartiallyFailingEmbeddingGateway(), partial_profile
+        ).index_video(video_id)
+    )
+    assert partial_summary.status == "partial"
+    assert partial_summary.indexed == 4
+    assert partial_summary.failed == 1
+    assert partial_summary.error_code == "EMBEDDING_INDEX_PARTIAL"
+
+    changed_document_id = f"doc_transcript_{suffix}"
+    changed_profile = profile.model_copy(update={"name": "source-changed-space"})
+    changed_summary = asyncio.run(
+        EmbeddingIndexService(
+            database,
+            SourceChangingEmbeddingGateway(database, changed_document_id),
+            changed_profile,
+        ).index_video(video_id)
+    )
+    assert changed_summary.status == "partial"
+    assert changed_summary.failures[0].document_ids == [changed_document_id]
+    assert changed_summary.failures[0].error_code == "INDEX_SOURCE_CHANGED"

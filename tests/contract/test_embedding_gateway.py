@@ -9,6 +9,7 @@ import pytest
 
 from evistream.models import (
     EmbeddingRequest,
+    MockEmbeddingGateway,
     ModelError,
     ModelErrorCode,
     OpenAICompatibleEmbeddingGateway,
@@ -83,11 +84,13 @@ def gateway(server: EmbeddingServer) -> OpenAICompatibleEmbeddingGateway:
 
 @pytest.mark.asyncio
 async def test_openai_compatible_embedding_contract() -> None:
+    request_model = EmbeddingRequest(
+        texts=("one", "two"), dimensions=8, trace_id="trace-embed"
+    )
     with embedding_server() as server:
-        response = await gateway(server).embed(
-            EmbeddingRequest(texts=("one", "two"), dimensions=8, trace_id="trace-embed")
-        )
+        response = await gateway(server).embed(request_model)
         request = server.last_request
+    mock_response = await MockEmbeddingGateway().embed(request_model)
     assert [item.index for item in response.vectors] == [0, 1]
     assert all(len(item.values) == 8 for item in response.vectors)
     assert response.actual_model == "compatible-embedding"
@@ -98,6 +101,9 @@ async def test_openai_compatible_embedding_contract() -> None:
         "dimensions": 8,
         "encoding_format": "float",
     }
+    assert response.__class__ is mock_response.__class__
+    assert response.model_dump().keys() == mock_response.model_dump().keys()
+    assert response.vectors[0].model_dump().keys() == mock_response.vectors[0].model_dump().keys()
 
 
 @pytest.mark.asyncio
