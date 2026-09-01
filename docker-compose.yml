@@ -5,15 +5,106 @@ services:
       POSTGRES_DB: evistream
       POSTGRES_USER: evistream
       POSTGRES_PASSWORD: evistream
-    ports:
-      - "127.0.0.1:54329:5432"
     volumes:
       - evistream-postgres:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U evistream -d evistream"]
       interval: 2s
       timeout: 3s
+      retries: 30
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  migrate:
+    build:
+      context: .
+      target: default
+    command: ["alembic", "upgrade", "head"]
+    environment: &app-environment
+      EVISTREAM_ENVIRONMENT: development
+      EVISTREAM_DATABASE_URL: postgresql+psycopg://evistream:evistream@postgres:5432/evistream
+      EVISTREAM_ARTIFACT_ROOT: /data/artifacts
+      EVISTREAM_TASK_DISPATCHER: rq
+      EVISTREAM_REDIS_URL: redis://redis:6379/0
+      EVISTREAM_MODEL_PROFILE: mock
+      EVISTREAM_ASR_BACKEND: mock
+      EVISTREAM_OCR_BACKEND: mock
+      EVISTREAM_VISION_BACKEND: mock
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - evistream-artifacts:/data/artifacts
+    restart: "no"
+
+  api:
+    build:
+      context: .
+      target: ${EVISTREAM_RUNTIME_TARGET:-default}
+    command: ["uvicorn", "apps.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment: *app-environment
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    volumes:
+      - evistream-artifacts:/data/artifacts
+    ports:
+      - "${EVISTREAM_API_BIND:-127.0.0.1}:8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8000/api/v1/ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      target: ${EVISTREAM_RUNTIME_TARGET:-default}
+    command: ["evistream", "worker"]
+    environment: *app-environment
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    volumes:
+      - evistream-artifacts:/data/artifacts
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - from redis import Redis; from rq import Worker; import os; assert Worker.all(connection=Redis.from_url(os.environ['EVISTREAM_REDIS_URL']))
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
+  web:
+    build:
+      context: apps/web
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "${EVISTREAM_WEB_BIND:-127.0.0.1}:5173:8080"
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--spider", "http://127.0.0.1:8080/healthz"]
+      interval: 5s
+      timeout: 3s
       retries: 20
+    restart: unless-stopped
 
 volumes:
   evistream-postgres:
+  evistream-artifacts:
