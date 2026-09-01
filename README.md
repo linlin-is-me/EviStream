@@ -2,7 +2,7 @@
 
 EviStream is an evidence-grounded investigation agent for long-form video moderation.
 The repository contains the provider-neutral foundation, PostgreSQL-backed media
-pipeline, and Stage 2 moderation domain and YAML policy compiler.
+pipeline, versioned moderation policies, hybrid retrieval and a uniform video-tool layer.
 
 ## Development quick start
 
@@ -20,6 +20,7 @@ make dev-infra
 make migrate
 evistream media-ingest tests/fixtures/media/stage0_sample.mp4 --process
 evistream seed-demo --check
+make verify-stage3
 ```
 
 In another terminal:
@@ -58,11 +59,24 @@ Real model credentials belong only in `.env`. CI always uses the Mock Gateway.
 The current verification state is recorded in
 [`docs/stage-0-report.md`](docs/stage-0-report.md).
 
+## Stage 3 retrieval
+
+Configure `EVISTREAM_EMBEDDING_MODEL`, then index a processed video and call a tool without
+starting an Agent:
+
+```bash
+evistream embedding-smoke --profile mock
+evistream retrieval-index <video-id> --profile mock
+evistream tool-run search_transcript --case-id <case-id> --requirement-id <requirement-id> --query evidence
+```
+
+See [`docs/retrieval.md`](docs/retrieval.md) and
+[`docs/tool-protocol.md`](docs/tool-protocol.md) for the stable contracts.
+
 ## Project boundaries
 
-Stage 2 adds versioned policies, cases, evidence contracts and deterministic rule
-compilation. Evidence aggregation, rule evaluation, queues, retrieval and the Agent
-investigation loop remain later stages. See
+Stage 3 stops at deterministic retrieval and media preparation. VLM inspection, Evidence
+aggregation, rule evaluation, queues and the Agent investigation loop remain later stages. See
 [`EviStream开发文档.md`](EviStream开发文档.md) for the complete architecture and roadmap.
 
 ## License
