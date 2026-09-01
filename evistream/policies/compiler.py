@@ -7,10 +7,11 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from evistream.domain import Severity
+from evistream.governance.types import AggregationConfig
 from evistream.policies.catalog import EXCEPTION_CATALOG, REQUIREMENT_CAPABILITIES
 from evistream.policies.schema import BooleanExpression, LoadedPolicy, PolicyDocument
 
-COMPILER_VERSION = "1"
+COMPILER_VERSION = "2"
 
 
 class CompiledModel(BaseModel):
@@ -37,6 +38,7 @@ class CompiledPolicy(CompiledModel):
     severity: Severity
     trigger_terms: list[str]
     requirements: list[EvidenceRequirementTemplate]
+    aggregation: AggregationConfig = Field(default_factory=AggregationConfig)
     reject_when: BooleanExpression
     escalate_when: BooleanExpression
     compiler_version: str
@@ -56,6 +58,7 @@ class PolicyCompiler:
             "severity": document.severity,
             "trigger_terms": document.trigger_terms,
             "requirements": templates,
+            "aggregation": document.aggregation,
             "reject_when": document.decision.reject_when,
             "escalate_when": document.decision.escalate_when,
             "compiler_version": COMPILER_VERSION,

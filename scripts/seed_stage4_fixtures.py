@@ -4,6 +4,9 @@ import json
 from pathlib import Path
 
 from evistream.config import get_settings
+from evistream.governance.types import AggregationConfig
+from evistream.policies.compiler import CompiledPolicy, EvidenceRequirementTemplate
+from evistream.policies.schema import BooleanExpression
 from evistream.retrieval.text import normalize_text, search_lexemes
 from evistream.storage.artifacts import LocalArtifactStore
 from evistream.storage.database import Database, utc_now
@@ -57,6 +60,31 @@ def _seed(
     source_uri = artifacts.put_file(source, f"videos/{video_id}/source.mp4")
     transcript_id = f"art_stage4_{scenario}"
     now = utc_now()
+    requirement = EvidenceRequirementTemplate(
+        requirement_key="weapon_presence",
+        requirement_type="speech_content",
+        source_kind="requirement",
+        required=True,
+        description="Determine whether a weapon is present",
+        suggested_queries=["weapon"],
+        modalities=["transcript"],
+        tool_capabilities=["search_transcript"],
+        semantic_sha256="3" * 64,
+    )
+    compiled = CompiledPolicy(
+        policy_id=policy_id,
+        version=1,
+        name=f"Stage 4 {scenario}",
+        enabled=True,
+        severity="HIGH",
+        trigger_terms=["weapon"],
+        requirements=[requirement],
+        aggregation=AggregationConfig(),
+        reject_when=BooleanExpression(all=["weapon_presence"]),
+        escalate_when=BooleanExpression(any=["contradictory_evidence"]),
+        compiler_version="2",
+        semantic_sha256="2" * 64,
+    )
     with database.session() as session:
         session.add(
             VideoRecord(
@@ -97,7 +125,7 @@ def _seed(
                 enabled=True,
                 lifecycle="PUBLISHED",
                 source_yaml="id: controlled-stage4-fixture",
-                compiled_policy={},
+                compiled_policy=compiled.model_dump(mode="json"),
                 source_sha256="1" * 64,
                 semantic_sha256="2" * 64,
                 compiler_version="stage4-fixture",

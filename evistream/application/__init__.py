@@ -5,6 +5,7 @@ from evistream.application.job_handlers import (
     AgentInvestigationJobHandler,
     DemoJobHandler,
     MediaPreprocessJobHandler,
+    PolicyReplayJobHandler,
 )
 from evistream.application.services import ApplicationService
 from evistream.application.types import JobExecution, JobHandlerError, JobRequest, JobStatus
@@ -20,4 +21,5 @@ __all__ = [
     "JobRequest",
     "JobStatus",
     "MediaPreprocessJobHandler",
+    "PolicyReplayJobHandler",
 ]

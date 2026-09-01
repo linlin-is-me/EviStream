@@ -142,6 +142,11 @@ class CaseRecord(TimestampMixin, Base):
         ),
         UniqueConstraint("video_id", "policy_id", "policy_version"),
         UniqueConstraint("id", "policy_id", "policy_version"),
+        ForeignKeyConstraint(
+            ["current_decision_id", "id"],
+            ["decisions.id", "decisions.case_id"],
+            ondelete="RESTRICT",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
@@ -150,6 +155,7 @@ class CaseRecord(TimestampMixin, Base):
     policy_version: Mapped[int] = mapped_column(Integer)
     model_profile: Mapped[str] = mapped_column(String(128))
     status: Mapped[str] = mapped_column(String(32), index=True)
+    current_decision_id: Mapped[str | None] = mapped_column(String(64))
 
 
 class RequirementRecord(TimestampMixin, Base):
@@ -157,6 +163,11 @@ class RequirementRecord(TimestampMixin, Base):
     __table_args__ = (
         UniqueConstraint("case_id", "requirement_key"),
         UniqueConstraint("id", "case_id"),
+        ForeignKeyConstraint(
+            ["current_result_id", "id"],
+            ["requirement_results.id", "requirement_results.requirement_id"],
+            ondelete="RESTRICT",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
@@ -171,6 +182,7 @@ class RequirementRecord(TimestampMixin, Base):
     tool_capabilities: Mapped[list[str]] = mapped_column(JSON)
     semantic_sha256: Mapped[str] = mapped_column(String(64))
     status: Mapped[str] = mapped_column(String(32), index=True)
+    current_result_id: Mapped[str | None] = mapped_column(String(64))
 
 
 class ToolRunRecord(TimestampMixin, Base):
@@ -246,20 +258,45 @@ class EvidenceRecord(TimestampMixin, Base):
     source_ref: Mapped[str] = mapped_column(String(255))
     summary: Mapped[str] = mapped_column(Text)
     confidence: Mapped[float | None]
+    origin_evidence_id: Mapped[str | None] = mapped_column(
+        ForeignKey("evidence.id", ondelete="RESTRICT")
+    )
+    replay_item_id: Mapped[str | None] = mapped_column(
+        ForeignKey("replay_items.id", ondelete="RESTRICT"), index=True
+    )
 
 
 class RequirementResultRecord(TimestampMixin, Base):
     __tablename__ = "requirement_results"
-    __table_args__ = (UniqueConstraint("id", "requirement_id"),)
+    __table_args__ = (
+        UniqueConstraint("id", "requirement_id"),
+        UniqueConstraint("id", "case_id"),
+        UniqueConstraint("requirement_id", "sequence"),
+        UniqueConstraint("requirement_id", "aggregator_version", "input_sha256"),
+        ForeignKeyConstraint(
+            ["requirement_id", "case_id"],
+            ["requirements.id", "requirements.case_id"],
+            ondelete="RESTRICT",
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     requirement_id: Mapped[str] = mapped_column(
         ForeignKey("requirements.id", ondelete="CASCADE"), index=True
     )
+    case_id: Mapped[str] = mapped_column(String(64), index=True)
+    sequence: Mapped[int] = mapped_column(Integer)
     status: Mapped[str] = mapped_column(String(32), index=True)
     reason_code: Mapped[str] = mapped_column(String(64))
     aggregator_version: Mapped[str] = mapped_column(String(64))
     input_sha256: Mapped[str] = mapped_column(String(64))
+    aggregation_config: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    origin_result_id: Mapped[str | None] = mapped_column(
+        ForeignKey("requirement_results.id", ondelete="RESTRICT")
+    )
+    replay_item_id: Mapped[str | None] = mapped_column(
+        ForeignKey("replay_items.id", ondelete="RESTRICT"), index=True
+    )
 
 
 class RequirementResultEvidenceRecord(Base):
@@ -291,6 +328,18 @@ class DecisionRecord(TimestampMixin, Base):
             ondelete="RESTRICT",
         ),
         UniqueConstraint("id", "case_id"),
+        UniqueConstraint("case_id", "sequence"),
+        UniqueConstraint("case_id", "source", "evaluator_version", "input_sha256"),
+        ForeignKeyConstraint(
+            ["agent_run_id", "case_id"],
+            ["agent_runs.id", "agent_runs.case_id"],
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["supersedes_decision_id", "case_id"],
+            ["decisions.id", "decisions.case_id"],
+            ondelete="RESTRICT",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
@@ -302,6 +351,14 @@ class DecisionRecord(TimestampMixin, Base):
     source: Mapped[str] = mapped_column(String(16))
     explanation: Mapped[str] = mapped_column(Text, default="")
     decision_metadata: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    sequence: Mapped[int] = mapped_column(Integer)
+    evaluator_version: Mapped[str] = mapped_column(String(64))
+    input_sha256: Mapped[str] = mapped_column(String(64))
+    agent_run_id: Mapped[str | None] = mapped_column(String(64))
+    supersedes_decision_id: Mapped[str | None] = mapped_column(String(64))
+    replay_item_id: Mapped[str | None] = mapped_column(
+        ForeignKey("replay_items.id", ondelete="RESTRICT"), index=True
+    )
 
 
 class DecisionEvidenceRecord(Base):
@@ -378,6 +435,7 @@ class AgentRunRecord(TimestampMixin, Base):
     provisional_verdict: Mapped[str | None] = mapped_column(String(32))
     stop_reason: Mapped[str | None] = mapped_column(String(64))
     result_payload: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    scope_requirement_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
 
 
 class AgentStepRecord(Base):
@@ -433,3 +491,181 @@ class ModelCallRecord(TimestampMixin, Base):
     latency_ms: Mapped[int] = mapped_column(Integer, default=0)
     provider_request_id: Mapped[str | None] = mapped_column(String(255))
     error_code: Mapped[str | None] = mapped_column(String(64))
+
+
+class DecisionRequirementResultRecord(Base):
+    __tablename__ = "decision_requirement_results"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["decision_id", "case_id"],
+            ["decisions.id", "decisions.case_id"],
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["result_id", "case_id"],
+            ["requirement_results.id", "requirement_results.case_id"],
+            ondelete="RESTRICT",
+        ),
+    )
+
+    decision_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    result_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    case_id: Mapped[str] = mapped_column(String(64))
+
+
+class ReviewRecord(Base):
+    __tablename__ = "reviews"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["reviewed_decision_id", "case_id"],
+            ["decisions.id", "decisions.case_id"],
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["decision_id", "case_id"],
+            ["decisions.id", "decisions.case_id"],
+            ondelete="RESTRICT",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    case_id: Mapped[str] = mapped_column(String(64), index=True)
+    request_key: Mapped[str] = mapped_column(String(64), unique=True)
+    reviewer: Mapped[str] = mapped_column(String(128))
+    reviewed_decision_id: Mapped[str | None] = mapped_column(String(64))
+    decision_id: Mapped[str] = mapped_column(String(64), unique=True)
+    note: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class AppealRecord(TimestampMixin, Base):
+    __tablename__ = "appeals"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["challenged_decision_id", "case_id"],
+            ["decisions.id", "decisions.case_id"],
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint("status IN ('OPEN', 'RESOLVED')"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    case_id: Mapped[str] = mapped_column(String(64), index=True)
+    request_key: Mapped[str] = mapped_column(String(64), unique=True)
+    submitter: Mapped[str] = mapped_column(String(128))
+    statement: Mapped[str] = mapped_column(Text)
+    challenged_decision_id: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(16), index=True)
+    resolution_review_id: Mapped[str | None] = mapped_column(ForeignKey("reviews.id"))
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class AppealEventRecord(Base):
+    __tablename__ = "appeal_events"
+    __table_args__ = (
+        UniqueConstraint("appeal_id", "sequence"),
+        CheckConstraint("event_type IN ('SUBMITTED', 'RESOLVED')"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    appeal_id: Mapped[str] = mapped_column(
+        ForeignKey("appeals.id", ondelete="CASCADE"), index=True
+    )
+    sequence: Mapped[int] = mapped_column(Integer)
+    event_type: Mapped[str] = mapped_column(String(24))
+    actor: Mapped[str] = mapped_column(String(128))
+    note: Mapped[str] = mapped_column(Text)
+    decision_id: Mapped[str | None] = mapped_column(ForeignKey("decisions.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class ReplayJobRecord(TimestampMixin, Base):
+    __tablename__ = "replay_jobs"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["policy_id", "source_version"],
+            ["policies.policy_id", "policies.version"],
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["policy_id", "target_version"],
+            ["policies.policy_id", "policies.version"],
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint("mode IN ('REEVALUATE', 'REINVESTIGATE')"),
+        CheckConstraint("model_change_policy IN ('keep', 'invalidate-visual')"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    processing_job_id: Mapped[str] = mapped_column(
+        ForeignKey("processing_jobs.id", ondelete="RESTRICT"), unique=True
+    )
+    policy_id: Mapped[str] = mapped_column(String(128), index=True)
+    source_version: Mapped[int] = mapped_column(Integer)
+    target_version: Mapped[int] = mapped_column(Integer)
+    mode: Mapped[str] = mapped_column(String(24))
+    preview_sha256: Mapped[str] = mapped_column(String(64))
+    model_profile: Mapped[str | None] = mapped_column(String(128))
+    model_change_policy: Mapped[str] = mapped_column(String(32))
+    status: Mapped[str] = mapped_column(String(32), index=True)
+    result_payload: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+
+
+class ReplayItemRecord(TimestampMixin, Base):
+    __tablename__ = "replay_items"
+    __table_args__ = (
+        UniqueConstraint("source_case_id", "target_policy_version"),
+        CheckConstraint("mode IN ('REEVALUATE', 'REINVESTIGATE')"),
+        CheckConstraint(
+            "status IN ('PENDING', 'MATERIALIZED', 'INVESTIGATING', "
+            "'COMPLETED', 'NEEDS_HUMAN_REVIEW', 'FAILED')"
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    replay_job_id: Mapped[str] = mapped_column(
+        ForeignKey("replay_jobs.id", ondelete="CASCADE"), index=True
+    )
+    source_case_id: Mapped[str] = mapped_column(
+        ForeignKey("cases.id", ondelete="RESTRICT"), index=True
+    )
+    target_case_id: Mapped[str | None] = mapped_column(
+        ForeignKey("cases.id", ondelete="RESTRICT"), index=True
+    )
+    target_policy_version: Mapped[int] = mapped_column(Integer)
+    mode: Mapped[str] = mapped_column(String(24))
+    status: Mapped[str] = mapped_column(String(32), index=True)
+    plan_payload: Mapped[dict[str, Any]] = mapped_column(JSON)
+    result_payload: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    source_decision_id: Mapped[str | None] = mapped_column(
+        ForeignKey("decisions.id", ondelete="RESTRICT")
+    )
+    target_decision_id: Mapped[str | None] = mapped_column(
+        ForeignKey("decisions.id", ondelete="RESTRICT")
+    )
+
+
+class ReplayLineageRecord(Base):
+    __tablename__ = "replay_lineage"
+    __table_args__ = (
+        UniqueConstraint(
+            "replay_item_id",
+            "entity_type",
+            "action",
+            "source_id",
+            "target_id",
+            "reason_code",
+        ),
+        CheckConstraint("action IN ('REUSED', 'INVALIDATED', 'RECREATED')"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    replay_item_id: Mapped[str] = mapped_column(
+        ForeignKey("replay_items.id", ondelete="CASCADE"), index=True
+    )
+    entity_type: Mapped[str] = mapped_column(String(32))
+    action: Mapped[str] = mapped_column(String(16))
+    source_id: Mapped[str | None] = mapped_column(String(64))
+    target_id: Mapped[str | None] = mapped_column(String(64))
+    reason_code: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)

@@ -10,6 +10,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from evistream.domain import Severity
+from evistream.governance.types import AggregationConfig
 from evistream.policies.catalog import EXCEPTION_CATALOG
 
 MAX_POLICY_BYTES = 256 * 1024
@@ -75,6 +76,7 @@ class PolicyDocument(StrictModel):
     trigger_terms: list[str] = Field(min_length=1)
     requirements: list[RequirementSpec] = Field(min_length=1)
     exceptions: list[str] = Field(default_factory=list)
+    aggregation: AggregationConfig = Field(default_factory=AggregationConfig)
     decision: DecisionSpec
 
     @model_validator(mode="after")

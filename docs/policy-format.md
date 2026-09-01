@@ -1,5 +1,18 @@
 # Policy format
 
+Stage 5 accepts an optional aggregation block. Omitted values retain the compiler defaults:
+
+```yaml
+aggregation:
+  minimum_confidence: 0.60
+  minimum_supporting_evidence: 1
+  minimum_contradicting_evidence: 1
+```
+
+Compiler version 2 includes this block in the Policy semantic hash. Requirement semantic hashes
+remain unchanged when only thresholds, severity, or decision expressions change, which permits
+deterministic `REEVALUATE` replay.
+
 Stage 2 policy files are UTF-8 YAML documents under `configs/policies`. The loader rejects
 files larger than 256 KiB, duplicate mapping keys and unknown fields.
 

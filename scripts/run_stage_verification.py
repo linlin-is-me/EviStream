@@ -23,7 +23,9 @@ DATABASE_PREFIX = "evistream_verify_"
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("stage", choices=["stage1", "stage2", "stage3", "stage4"])
+    parser.add_argument(
+        "stage", choices=["stage1", "stage2", "stage3", "stage4", "stage5"]
+    )
     arguments = parser.parse_args()
     source = make_url(get_settings().database_url)
     suffix = uuid4().hex[:12]
@@ -54,6 +56,13 @@ def main() -> None:
 
 
 def _run_migrations(stage: str, root: Path, environment: dict[str, str]) -> None:
+    if stage == "stage5":
+        stage4_revision = "0005_stage4_agent_runtime"
+        _run([sys.executable, "-m", "alembic", "upgrade", stage4_revision], root, environment)
+        _run([sys.executable, "-m", "alembic", "upgrade", "head"], root, environment)
+        _run([sys.executable, "-m", "alembic", "downgrade", stage4_revision], root, environment)
+        _run([sys.executable, "-m", "alembic", "upgrade", "head"], root, environment)
+        return
     if stage == "stage4":
         legacy_run_id = f"manual_legacy_{uuid4().hex[:12]}"
         _run(
@@ -87,7 +96,7 @@ def _run_migrations(stage: str, root: Path, environment: dict[str, str]) -> None
 def _run_checks(stage: str, root: Path, environment: dict[str, str]) -> None:
     _run([sys.executable, "-m", "ruff", "check", "."], root, environment)
     _run([sys.executable, "-m", "mypy", "evistream", "apps"], root, environment)
-    if stage in {"stage2", "stage3", "stage4"}:
+    if stage in {"stage2", "stage3", "stage4", "stage5"}:
         for policy in [
             "violence-weapon-v1.yaml",
             "dangerous-behavior-v1.yaml",
@@ -109,7 +118,7 @@ def _run_checks(stage: str, root: Path, environment: dict[str, str]) -> None:
             root,
             environment,
         )
-    if stage in {"stage3", "stage4"}:
+    if stage in {"stage3", "stage4", "stage5"}:
         _run(
             [
                 sys.executable,
@@ -122,7 +131,7 @@ def _run_checks(stage: str, root: Path, environment: dict[str, str]) -> None:
             root,
             environment,
         )
-    if stage == "stage4":
+    if stage in {"stage4", "stage5"}:
         _run([sys.executable, "scripts/seed_stage4_fixtures.py"], root, environment)
         for scenario in ["obvious", "cross-segment", "insufficient"]:
             case_suffix = scenario.replace("-", "_")
@@ -149,6 +158,8 @@ def _run_checks(stage: str, root: Path, environment: dict[str, str]) -> None:
                 stage_environment,
             )
         _verify_stage4_paths(environment["EVISTREAM_DATABASE_URL"], root, environment)
+        if stage == "stage5":
+            _verify_stage5_governance(root, environment)
     _run([sys.executable, "-m", "pytest"], root, environment)
 
 
@@ -253,6 +264,88 @@ def _verify_stage4_paths(
             )
             if status_payload.get("status") != status or not trace_payload.get("steps"):
                 raise RuntimeError(f"Stage 4 status or trace CLI failed: {case_id}")
+
+
+def _verify_stage5_governance(root: Path, environment: dict[str, str]) -> None:
+    expected = {
+        "case_stage4_obvious": "REJECT",
+        "case_stage4_cross_segment": "REJECT",
+        "case_stage4_insufficient": "NEEDS_HUMAN_REVIEW",
+    }
+    for case_id, verdict in expected.items():
+        payload = _run_json(
+            [sys.executable, "-m", "evistream.cli", "case-evaluate", case_id],
+            root,
+            environment,
+        )
+        if payload.get("verdict") != verdict:
+            raise RuntimeError(f"Stage 5 formal verdict mismatch: {case_id}")
+    review = _run_json(
+        [
+            sys.executable,
+            "-m",
+            "evistream.cli",
+            "case-review",
+            "case_stage4_obvious",
+            "--reviewer",
+            "stage5-verifier",
+            "--verdict",
+            "APPROVE",
+            "--note",
+            "controlled human override",
+        ],
+        root,
+        environment,
+    )
+    appeal = _run_json(
+        [
+            sys.executable,
+            "-m",
+            "evistream.cli",
+            "appeal-submit",
+            "case_stage4_obvious",
+            "--submitter",
+            "stage5-fixture",
+            "--statement",
+            "controlled appeal",
+        ],
+        root,
+        environment,
+    )
+    _run_json(
+        [
+            sys.executable,
+            "-m",
+            "evistream.cli",
+            "appeal-resolve",
+            str(appeal["appeal_id"]),
+            "--reviewer",
+            "stage5-appeal-reviewer",
+            "--verdict",
+            "REJECT",
+            "--note",
+            "controlled appeal resolution",
+        ],
+        root,
+        environment,
+    )
+    timeline = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "evistream.cli",
+            "case-timeline",
+            "case_stage4_obvious",
+        ],
+        cwd=root,
+        env=environment,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    timeline_payload = json.loads(timeline.stdout)
+    if not isinstance(timeline_payload, list) or not review.get("decision_id"):
+        raise RuntimeError("Stage 5 timeline or review CLI failed")
 
 
 def _run_json(
