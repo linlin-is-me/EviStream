@@ -1,9 +1,9 @@
 """Application-layer services and task dispatching."""
 
 from evistream.application.dispatcher import HandlerRegistry, InlineExecutor
-from evistream.application.job_handlers import DemoJobHandler
+from evistream.application.job_handlers import DemoJobHandler, MediaPreprocessJobHandler
 from evistream.application.services import ApplicationService
-from evistream.application.types import JobExecution, JobRequest, JobStatus
+from evistream.application.types import JobExecution, JobHandlerError, JobRequest, JobStatus
 
 __all__ = [
     "ApplicationService",
@@ -11,6 +11,8 @@ __all__ = [
     "HandlerRegistry",
     "InlineExecutor",
     "JobExecution",
+    "JobHandlerError",
     "JobRequest",
     "JobStatus",
+    "MediaPreprocessJobHandler",
 ]

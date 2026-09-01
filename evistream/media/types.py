@@ -4,6 +4,8 @@ from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
+from evistream.application.types import JobStatus
+
 
 class VideoStatus(StrEnum):
     UPLOADED = "UPLOADED"
@@ -40,7 +42,7 @@ class MediaJob(BaseModel):
     job_id: str
     video_id: str
     request_key: str
-    status: str
+    status: JobStatus
     attempt: int = Field(ge=0)
     error_code: str | None = None
 

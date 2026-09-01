@@ -2,7 +2,13 @@
 
 from time import perf_counter
 
-from evistream.application.types import JobExecution, JobHandler, JobRequest, JobStatus
+from evistream.application.types import (
+    JobExecution,
+    JobHandler,
+    JobHandlerError,
+    JobRequest,
+    JobStatus,
+)
 
 
 class HandlerRegistry:
@@ -34,6 +40,15 @@ class InlineExecutor:
         try:
             handler = self._registry.get(request.job_type)
             result = await handler.handle(request)
+        except JobHandlerError as error:
+            return JobExecution(
+                job_id=request.job_id,
+                job_type=request.job_type,
+                status=JobStatus.FAILED,
+                error_code=error.code,
+                error_message=str(error),
+                elapsed_ms=_elapsed_ms(started),
+            )
         except (LookupError, ValueError) as error:
             return JobExecution(
                 job_id=request.job_id,

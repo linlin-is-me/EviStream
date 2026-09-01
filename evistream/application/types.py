@@ -15,6 +15,12 @@ class JobStatus(StrEnum):
     CANCELLED = "CANCELLED"
 
 
+class JobHandlerError(RuntimeError):
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
 class JobRequest(BaseModel):
     job_id: str = Field(min_length=1)
     job_type: str = Field(min_length=1)
