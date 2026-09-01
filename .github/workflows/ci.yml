@@ -54,10 +54,8 @@ jobs:
         run: mypy evistream apps
       - name: Check Linux toolchain
         run: make doctor
-      - name: Migrate database
-        run: alembic upgrade head
-      - name: Test
-        run: pytest
+      - name: Verify Stage 3
+        run: make verify-stage3 PYTHON=python
       - name: Start API and verify health
         shell: bash
         run: |

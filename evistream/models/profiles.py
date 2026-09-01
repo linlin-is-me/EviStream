@@ -17,6 +17,7 @@ class ProfileModels(BaseModel):
     triage_env: str
     verifier_env: str
     judge_env: str
+    embedding_env: str | None = None
 
     def environment_name(self, role: ModelRole) -> str:
         return {
@@ -32,6 +33,8 @@ class ProfileDefaults(BaseModel):
     timeout_seconds: float = Field(default=30.0, gt=0, le=600)
     structured_output: bool = True
     max_attempts: int = Field(default=2, ge=1, le=5)
+    embedding_dimensions: int = Field(default=1536, gt=0, le=4096)
+    embedding_batch_size: int = Field(default=10, ge=1, le=100)
 
 
 class ModelProfile(BaseModel):
@@ -52,6 +55,18 @@ class ResolvedModelProfile(BaseModel):
     model: str
     defaults: ProfileDefaults
     capabilities: ModelCapability
+
+
+class ResolvedEmbeddingProfile(BaseModel):
+    name: str
+    gateway: Literal["mock", "openai_compatible"]
+    base_url: str | None
+    api_key: str | None
+    model: str
+    dimensions: int
+    batch_size: int
+    timeout_seconds: float
+    max_attempts: int
 
 
 def load_model_profile(config_dir: Path, profile_name: str) -> ModelProfile:
@@ -112,6 +127,39 @@ def resolve_model_profile(
         model=model,
         defaults=profile.defaults,
         capabilities=profile.capabilities,
+    )
+
+
+def resolve_embedding_profile(
+    profile: ModelProfile,
+    environment: Mapping[str, str] | None = None,
+) -> ResolvedEmbeddingProfile:
+    values = environment if environment is not None else os.environ
+    if profile.gateway == "mock":
+        return ResolvedEmbeddingProfile(
+            name=profile.name,
+            gateway=profile.gateway,
+            base_url=None,
+            api_key=None,
+            model="mock-embedding-v1",
+            dimensions=profile.defaults.embedding_dimensions,
+            batch_size=profile.defaults.embedding_batch_size,
+            timeout_seconds=profile.defaults.timeout_seconds,
+            max_attempts=1,
+        )
+    base_url = _required_value(values, profile.base_url_env, "base URL")
+    api_key = _required_value(values, profile.api_key_env, "API key")
+    model = _required_value(values, profile.models.embedding_env, "embedding model ID")
+    return ResolvedEmbeddingProfile(
+        name=profile.name,
+        gateway=profile.gateway,
+        base_url=base_url,
+        api_key=api_key,
+        model=model,
+        dimensions=profile.defaults.embedding_dimensions,
+        batch_size=profile.defaults.embedding_batch_size,
+        timeout_seconds=profile.defaults.timeout_seconds,
+        max_attempts=profile.defaults.max_attempts,
     )
 
 

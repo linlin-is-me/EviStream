@@ -8,6 +8,7 @@ from sqlalchemy import (
     JSON,
     BigInteger,
     CheckConstraint,
+    Computed,
     DateTime,
     ForeignKey,
     ForeignKeyConstraint,
@@ -19,6 +20,7 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
+from sqlalchemy.dialects.postgresql import TSVECTOR
 from sqlalchemy.orm import Mapped, mapped_column
 
 from evistream.storage.database import Base, utc_now
@@ -85,7 +87,17 @@ class SearchDocumentRecord(TimestampMixin, Base):
     start_ms: Mapped[int] = mapped_column(BigInteger)
     end_ms: Mapped[int] = mapped_column(BigInteger)
     text: Mapped[str] = mapped_column(Text)
+    normalized_text: Mapped[str] = mapped_column(Text)
+    keyword_lexemes: Mapped[str] = mapped_column(Text)
+    search_vector: Mapped[Any] = mapped_column(
+        TSVECTOR,
+        Computed("to_tsvector('simple', keyword_lexemes)", persisted=True),
+    )
     embedding: Mapped[list[float] | None] = mapped_column(Vector(1536))
+    embedding_space: Mapped[str | None] = mapped_column(String(64), index=True)
+    embedding_model: Mapped[str | None] = mapped_column(String(255))
+    embedding_source_sha256: Mapped[str | None] = mapped_column(String(64))
+    embedding_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class ProcessingJobRecord(TimestampMixin, Base):

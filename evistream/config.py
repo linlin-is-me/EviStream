@@ -35,6 +35,10 @@ class Settings(BaseSettings):
     video_max_duration_seconds: int = Field(default=3600, gt=0)
     scene_threshold: float = Field(default=0.3, gt=0, lt=1)
     simulated_stream_segment_seconds: int = Field(default=10, gt=0)
+    retrieval_rrf_k: int = Field(default=60, gt=0)
+    retrieval_candidate_limit: int = Field(default=100, ge=20, le=1000)
+    retrieval_context_ms: int = Field(default=10_000, ge=0)
+    tool_clip_max_seconds: int = Field(default=30, gt=0, le=300)
 
 
 @lru_cache(maxsize=1)
