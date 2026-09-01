@@ -160,6 +160,11 @@ class RequirementResult(DomainModel):
     reason_code: str = Field(min_length=1, max_length=64)
     aggregator_version: str = Field(min_length=1, max_length=64)
     input_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    case_id: str | None = Field(default=None, max_length=64)
+    sequence: int | None = Field(default=None, ge=1)
+    aggregation_config: dict[str, Any] = Field(default_factory=dict)
+    origin_result_id: str | None = Field(default=None, max_length=64)
+    replay_item_id: str | None = Field(default=None, max_length=64)
     created_at: datetime
     updated_at: datetime
 
@@ -181,5 +186,11 @@ class Decision(DomainModel):
     explanation: str = ""
     evidence_ids: list[str]
     decision_metadata: dict[str, Any] = Field(default_factory=dict)
+    sequence: int | None = Field(default=None, ge=1)
+    evaluator_version: str | None = Field(default=None, max_length=64)
+    input_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    agent_run_id: str | None = Field(default=None, max_length=64)
+    supersedes_decision_id: str | None = Field(default=None, max_length=64)
+    replay_item_id: str | None = Field(default=None, max_length=64)
     created_at: datetime
     updated_at: datetime

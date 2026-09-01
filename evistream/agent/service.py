@@ -22,6 +22,7 @@ from evistream.agent.types import (
 from evistream.application.types import JobRequest, JobStatus
 from evistream.config import Settings
 from evistream.domain import CaseStatus
+from evistream.governance.evidence import EvidenceStore
 from evistream.storage.database import Database, utc_now
 from evistream.storage.models import (
     AgentRunRecord,
@@ -83,12 +84,19 @@ class AgentInvestigationService:
         database: Database,
         settings: Settings,
         checkpoint_hook: Callable[[InvestigationState], None] | None = None,
+        evidence_store: EvidenceStore | None = None,
     ) -> None:
         self.database = database
         self.settings = settings
         self.checkpoint_hook = checkpoint_hook
+        self.evidence_store = evidence_store or EvidenceStore()
 
-    def prepare(self, case_id: str, profile: str | None = None) -> JobRequest:
+    def prepare(
+        self,
+        case_id: str,
+        profile: str | None = None,
+        scope_requirement_ids: list[str] | None = None,
+    ) -> JobRequest:
         with self.database.session() as session:
             case = session.get(CaseRecord, case_id)
             if case is None:
@@ -103,6 +111,11 @@ class AgentInvestigationService:
                 if profile is not None and profile != existing.model_profile:
                     raise AgentRuntimeError(
                         "AGENT_PROFILE_CONFLICT", "the existing run uses another model profile"
+                    )
+                requested_scope = sorted(set(scope_requirement_ids or []))
+                if requested_scope and requested_scope != sorted(existing.scope_requirement_ids):
+                    raise AgentRuntimeError(
+                        "AGENT_SCOPE_CONFLICT", "the existing run uses another requirement scope"
                     )
                 if existing.status in {"FAILED", "CANCELLED"}:
                     raise AgentRuntimeError(
@@ -126,6 +139,16 @@ class AgentInvestigationService:
                     .order_by(RequirementRecord.requirement_key)
                 ).all()
             )
+            requested_scope = sorted(set(scope_requirement_ids or []))
+            if requested_scope:
+                known_ids = {item.id for item in requirements}
+                unknown_ids = sorted(set(requested_scope) - known_ids)
+                if unknown_ids:
+                    raise AgentRuntimeError(
+                        "AGENT_ACTION_INVALID",
+                        f"requirement scope is outside the case: {unknown_ids}",
+                    )
+                requirements = [item for item in requirements if item.id in requested_scope]
             if not requirements:
                 raise AgentRuntimeError(
                     "AGENT_CASE_NOT_READY", "case has no instantiated requirements"
@@ -136,7 +159,7 @@ class AgentInvestigationService:
             correlation_id = f"corr_{uuid4().hex}"
             request_key = sha256(
                 f"AGENT_INVESTIGATION:{case.id}:{case.policy_id}:{case.policy_version}:"
-                f"{selected_profile}".encode()
+                f"{selected_profile}:{','.join(requested_scope)}".encode()
             ).hexdigest()
             state = InvestigationState(
                 run_id=run_id,
@@ -181,6 +204,7 @@ class AgentInvestigationService:
                     state_snapshot=state.model_dump(mode="json"),
                     state_version=0,
                     status=InvestigationStatus.PENDING,
+                    scope_requirement_ids=requested_scope,
                     iteration=0,
                     vlm_calls=0,
                     consecutive_tool_failures=0,
@@ -205,6 +229,7 @@ class AgentInvestigationService:
                     "run_id": run_id,
                     "case_id": case.id,
                     "model_profile": selected_profile,
+                    "scope_requirement_ids": requested_scope,
                 },
             )
 
@@ -356,27 +381,11 @@ class AgentInvestigationService:
                 )
             )
             for item in evidence:
-                if session.get(EvidenceRecord, item.evidence_id) is not None:
-                    continue
-                session.add(
-                    EvidenceRecord(
-                        id=item.evidence_id,
-                        case_id=state.case_id,
-                        requirement_id=item.requirement_id,
-                        stance=item.stance,
-                        modality=item.modality,
-                        start_ms=item.start_ms,
-                        end_ms=item.end_ms,
-                        artifact_id=item.artifact_id,
-                        tool_run_id=item.tool_run_id,
-                        model_call_id=item.model_call_id,
-                        model_name=item.model_name,
-                        source_ref=item.source_ref,
-                        summary=item.summary,
-                        confidence=item.confidence,
-                        created_at=now,
-                        updated_at=now,
-                    )
+                self.evidence_store.append_pending(
+                    session,
+                    case_id=state.case_id,
+                    item=item,
+                    now=now,
                 )
             session.add(
                 AgentStepRecord(
