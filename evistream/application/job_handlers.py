@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from evistream.agent.service import AgentInvestigationService
     from evistream.agent.types import InvestigationState
     from evistream.media.service import MediaApplicationService
+    from evistream.replay.service import ReplayApplicationService
 
 
 class DemoJobHandler:
@@ -76,3 +77,30 @@ class AgentInvestigationJobHandler:
             if claimed and error.code != "AGENT_STATE_CONFLICT":
                 self._service.fail(run_id, error.code)
             raise JobHandlerError(error.code, str(error)) from error
+
+
+class PolicyReplayJobHandler:
+    def __init__(self, service: "ReplayApplicationService") -> None:
+        self._service = service
+
+    async def handle(self, request: JobRequest) -> dict[str, Any]:
+        from evistream.governance.errors import GovernanceError
+
+        if request.job_type != "POLICY_REPLAY":
+            raise JobHandlerError("JOB_INVALID", "unexpected replay job type")
+        replay_job_id = request.payload.get("replay_job_id")
+        if not isinstance(replay_job_id, str):
+            raise JobHandlerError("REPLAY_NOT_RESUMABLE", "request has no replay job ID")
+        claimed = False
+        try:
+            self._service.claim(request)
+            claimed = True
+            return (await self._service.execute(replay_job_id)).model_dump(mode="json")
+        except GovernanceError as error:
+            if claimed:
+                self._service.fail(replay_job_id, error.code)
+            raise JobHandlerError(error.code, str(error)) from error
+        except Exception:
+            if claimed:
+                self._service.fail(replay_job_id, "REPLAY_NOT_RESUMABLE")
+            raise

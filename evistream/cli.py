@@ -20,6 +20,12 @@ from evistream.application import (
     InlineExecutor,
 )
 from evistream.config import Settings, get_settings
+from evistream.domain import Verdict
+from evistream.governance.errors import GovernanceError
+from evistream.governance.review import HumanGovernanceService
+from evistream.governance.runtime import build_governance_runtime
+from evistream.governance.service import GovernanceApplicationService
+from evistream.governance.timeline import CaseTimelineService
 from evistream.media.asr import ASRAdapter, ASRRequest, FasterWhisperASR, MockASR
 from evistream.media.probe import MediaProbeError, probe_video
 from evistream.media.runtime import MediaAdapterUnavailable, build_media_runtime
@@ -36,6 +42,8 @@ from evistream.policies.compiler import PolicyCompiler
 from evistream.policies.schema import PolicyError, load_policy
 from evistream.policies.seeds import apply_demo_seeds, validate_demo_seeds
 from evistream.policies.versioning import PolicyVersionError, PolicyVersionService
+from evistream.replay.planner import ReplayPlanner
+from evistream.replay.service import ReplayApplicationService
 from evistream.retrieval import EmbeddingIndexService, HybridRetrievalService
 from evistream.storage.artifacts import LocalArtifactStore
 from evistream.storage.database import Database
@@ -429,6 +437,170 @@ def seed_demo(
     except PolicyVersionError as error:
         _fail(error.code, str(error))
     typer.echo(summary.model_dump_json(indent=2))
+
+
+@app.command("case-evaluate")
+def case_evaluate(case_id: Annotated[str, typer.Argument()]) -> None:
+    try:
+        result = GovernanceApplicationService(
+            Database(_load_settings().database_url)
+        ).finalize_case(case_id)
+    except GovernanceError as error:
+        _fail(error.code, str(error))
+    typer.echo(result.model_dump_json(indent=2))
+
+
+@app.command("case-timeline")
+def case_timeline(case_id: Annotated[str, typer.Argument()]) -> None:
+    try:
+        result = CaseTimelineService(
+            Database(_load_settings().database_url)
+        ).timeline(case_id)
+    except GovernanceError as error:
+        _fail(error.code, str(error))
+    typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+@app.command("case-review")
+def case_review(
+    case_id: Annotated[str, typer.Argument()],
+    reviewer: Annotated[str, typer.Option()],
+    verdict: Annotated[Verdict, typer.Option()],
+    note: Annotated[str, typer.Option()] = "human review",
+) -> None:
+    try:
+        result = HumanGovernanceService(
+            Database(_load_settings().database_url)
+        ).submit_review(case_id, reviewer=reviewer, verdict=verdict, note=note)
+    except GovernanceError as error:
+        _fail(error.code, str(error))
+    typer.echo(result.model_dump_json(indent=2))
+
+
+@app.command("appeal-submit")
+def appeal_submit(
+    case_id: Annotated[str, typer.Argument()],
+    submitter: Annotated[str, typer.Option()],
+    statement: Annotated[str, typer.Option()],
+) -> None:
+    try:
+        result = HumanGovernanceService(
+            Database(_load_settings().database_url)
+        ).submit_appeal(case_id, submitter=submitter, statement=statement)
+    except GovernanceError as error:
+        _fail(error.code, str(error))
+    typer.echo(result.model_dump_json(indent=2))
+
+
+@app.command("appeal-resolve")
+def appeal_resolve(
+    appeal_id: Annotated[str, typer.Argument()],
+    reviewer: Annotated[str, typer.Option()],
+    verdict: Annotated[Verdict, typer.Option()],
+    note: Annotated[str, typer.Option()] = "appeal resolution",
+) -> None:
+    try:
+        result = HumanGovernanceService(
+            Database(_load_settings().database_url)
+        ).resolve_appeal(appeal_id, reviewer=reviewer, verdict=verdict, note=note)
+    except GovernanceError as error:
+        _fail(error.code, str(error))
+    typer.echo(result.model_dump_json(indent=2))
+
+
+@app.command("replay-preview")
+def replay_preview(
+    policy_id: Annotated[str, typer.Argument()],
+    from_version: Annotated[int, typer.Option("--from-version", min=1)],
+    to_version: Annotated[int, typer.Option("--to-version", min=1)],
+    model_change_policy: Annotated[
+        str, typer.Option(help="keep or invalidate-visual")
+    ] = "keep",
+) -> None:
+    try:
+        result = ReplayPlanner(Database(_load_settings().database_url)).preview(
+            policy_id,
+            from_version,
+            to_version,
+            model_change_policy=model_change_policy,
+        )
+    except GovernanceError as error:
+        _fail(error.code, str(error))
+    typer.echo(result.model_dump_json(indent=2))
+
+
+@app.command("replay-run")
+def replay_run(
+    policy_id: Annotated[str, typer.Argument()],
+    from_version: Annotated[int, typer.Option("--from-version", min=1)],
+    to_version: Annotated[int, typer.Option("--to-version", min=1)],
+    preview_hash: Annotated[str, typer.Option("--preview-hash")],
+    profile: Annotated[str | None, typer.Option()] = None,
+    model_change_policy: Annotated[
+        str, typer.Option(help="keep or invalidate-visual")
+    ] = "keep",
+) -> None:
+    settings = _load_settings()
+    try:
+        preview = ReplayPlanner(Database(settings.database_url)).preview(
+            policy_id,
+            from_version,
+            to_version,
+            model_change_policy=model_change_policy,
+        )
+        needs_agent = any(item.investigate_requirement_keys for item in preview.cases)
+        runtime = build_governance_runtime(
+            settings, profile or settings.model_profile if needs_agent else None
+        )
+        request = runtime.replay.prepare(
+            policy_id,
+            from_version,
+            to_version,
+            preview_hash,
+            model_profile=profile,
+            model_change_policy=model_change_policy,
+        )
+        execution = asyncio.run(runtime.dispatcher.dispatch(request))
+    except (GovernanceError, AgentRuntimeError, ModelError) as error:
+        _fail(getattr(error, "code", "REPLAY_NOT_RESUMABLE"), str(error))
+    if execution.error_code:
+        _fail(execution.error_code, execution.error_message or "replay failed")
+    typer.echo(json.dumps(execution.result, ensure_ascii=False, indent=2))
+
+
+@app.command("replay-status")
+def replay_status(job_id: Annotated[str, typer.Argument()]) -> None:
+    settings = _load_settings()
+    database = Database(settings.database_url)
+    service = ReplayApplicationService(
+        database,
+        ReplayPlanner(database),
+        GovernanceApplicationService(database),
+    )
+    try:
+        result = service.status(job_id)
+    except GovernanceError as error:
+        _fail(error.code, str(error))
+    if isinstance(result, BaseModel):
+        typer.echo(result.model_dump_json(indent=2))
+    else:
+        typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+@app.command("replay-diff")
+def replay_diff(job_id: Annotated[str, typer.Argument()]) -> None:
+    settings = _load_settings()
+    database = Database(settings.database_url)
+    service = ReplayApplicationService(
+        database,
+        ReplayPlanner(database),
+        GovernanceApplicationService(database),
+    )
+    try:
+        result = service.diff(job_id)
+    except GovernanceError as error:
+        _fail(error.code, str(error))
+    typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
 
 
 def _load_settings() -> Settings:
