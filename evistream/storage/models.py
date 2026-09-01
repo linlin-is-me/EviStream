@@ -141,6 +141,7 @@ class CaseRecord(TimestampMixin, Base):
             ["policies.policy_id", "policies.version"],
         ),
         UniqueConstraint("video_id", "policy_id", "policy_version"),
+        UniqueConstraint("id", "policy_id", "policy_version"),
     )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
@@ -182,14 +183,17 @@ class ToolRunRecord(TimestampMixin, Base):
             unique=True,
             postgresql_where=text("run_id IS NOT NULL"),
         ),
+        ForeignKeyConstraint(
+            ["requirement_id", "case_id"],
+            ["requirements.id", "requirements.case_id"],
+            ondelete="RESTRICT",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     run_id: Mapped[str | None] = mapped_column(String(64), index=True)
     case_id: Mapped[str] = mapped_column(ForeignKey("cases.id", ondelete="CASCADE"), index=True)
-    requirement_id: Mapped[str | None] = mapped_column(
-        ForeignKey("requirements.id", ondelete="SET NULL"), index=True
-    )
+    requirement_id: Mapped[str | None] = mapped_column(String(64), index=True)
     correlation_id: Mapped[str] = mapped_column(String(64), index=True)
     tool_name: Mapped[str] = mapped_column(String(128))
     request_key: Mapped[str] = mapped_column(String(64))
@@ -214,6 +218,8 @@ class EvidenceRecord(TimestampMixin, Base):
             "confidence IS NULL OR (confidence >= 0 AND confidence <= 1)",
             name="ck_evidence_confidence",
         ),
+        UniqueConstraint("id", "requirement_id"),
+        UniqueConstraint("id", "case_id"),
     )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
@@ -234,6 +240,7 @@ class EvidenceRecord(TimestampMixin, Base):
 
 class RequirementResultRecord(TimestampMixin, Base):
     __tablename__ = "requirement_results"
+    __table_args__ = (UniqueConstraint("id", "requirement_id"),)
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     requirement_id: Mapped[str] = mapped_column(
@@ -247,26 +254,37 @@ class RequirementResultRecord(TimestampMixin, Base):
 
 class RequirementResultEvidenceRecord(Base):
     __tablename__ = "requirement_result_evidence"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["result_id", "requirement_id"],
+            ["requirement_results.id", "requirement_results.requirement_id"],
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["evidence_id", "requirement_id"],
+            ["evidence.id", "evidence.requirement_id"],
+            ondelete="RESTRICT",
+        ),
+    )
 
-    result_id: Mapped[str] = mapped_column(
-        ForeignKey("requirement_results.id", ondelete="CASCADE"), primary_key=True
-    )
-    evidence_id: Mapped[str] = mapped_column(
-        ForeignKey("evidence.id", ondelete="RESTRICT"), primary_key=True
-    )
+    result_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    evidence_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    requirement_id: Mapped[str] = mapped_column(String(64))
 
 
 class DecisionRecord(TimestampMixin, Base):
     __tablename__ = "decisions"
     __table_args__ = (
         ForeignKeyConstraint(
-            ["policy_id", "policy_version"],
-            ["policies.policy_id", "policies.version"],
+            ["case_id", "policy_id", "policy_version"],
+            ["cases.id", "cases.policy_id", "cases.policy_version"],
+            ondelete="RESTRICT",
         ),
+        UniqueConstraint("id", "case_id"),
     )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    case_id: Mapped[str] = mapped_column(ForeignKey("cases.id", ondelete="CASCADE"), index=True)
+    case_id: Mapped[str] = mapped_column(String(64), index=True)
     policy_id: Mapped[str] = mapped_column(String(128))
     policy_version: Mapped[int] = mapped_column(Integer)
     verdict: Mapped[str] = mapped_column(String(32), index=True)
@@ -278,10 +296,19 @@ class DecisionRecord(TimestampMixin, Base):
 
 class DecisionEvidenceRecord(Base):
     __tablename__ = "decision_evidence"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["decision_id", "case_id"],
+            ["decisions.id", "decisions.case_id"],
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["evidence_id", "case_id"],
+            ["evidence.id", "evidence.case_id"],
+            ondelete="RESTRICT",
+        ),
+    )
 
-    decision_id: Mapped[str] = mapped_column(
-        ForeignKey("decisions.id", ondelete="CASCADE"), primary_key=True
-    )
-    evidence_id: Mapped[str] = mapped_column(
-        ForeignKey("evidence.id", ondelete="RESTRICT"), primary_key=True
-    )
+    decision_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    evidence_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    case_id: Mapped[str] = mapped_column(String(64))
