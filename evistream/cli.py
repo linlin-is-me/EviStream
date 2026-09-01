@@ -10,6 +10,9 @@ import typer
 from dotenv import load_dotenv
 from pydantic import BaseModel
 
+from evistream.agent.errors import AgentRuntimeError
+from evistream.agent.runtime import build_agent_runtime
+from evistream.agent.service import AgentInvestigationService
 from evistream.application import (
     ApplicationService,
     DemoJobHandler,
@@ -289,6 +292,54 @@ def tool_run(
     typer.echo(result.model_dump_json(indent=2))
     if result.status == "failed":
         raise typer.Exit(code=1)
+
+
+@app.command("investigate")
+def investigate(
+    case_id: Annotated[str, typer.Argument()],
+    profile: Annotated[str | None, typer.Option(help="Model profile for a new run.")] = None,
+) -> None:
+    settings = _load_settings()
+    database = Database(settings.database_url)
+    with database.session() as session:
+        case = session.get(CaseRecord, case_id)
+        if case is None:
+            _fail("CASE_NOT_FOUND", f"case not found: {case_id}")
+        selected_profile = profile or case.model_profile
+    try:
+        runtime = build_agent_runtime(settings, selected_profile)
+        request = runtime.service.prepare(case_id, profile)
+        execution = asyncio.run(runtime.dispatcher.dispatch(request))
+    except AgentRuntimeError as error:
+        _fail(error.code, str(error))
+    except (MediaAdapterUnavailable, ModelError) as error:
+        _fail(getattr(error, "code", "MODEL_UNAVAILABLE"), str(error))
+    if execution.error_code:
+        _fail(execution.error_code, execution.error_message or "investigation failed")
+    run_id = str(request.payload["run_id"])
+    result = runtime.service.get_result(run_id)
+    typer.echo(result.model_dump_json(indent=2))
+
+
+@app.command("investigation-status")
+def investigation_status(run_id: Annotated[str, typer.Argument()]) -> None:
+    try:
+        result = AgentInvestigationService(
+            Database(_load_settings().database_url), _load_settings()
+        ).get_result(run_id)
+    except AgentRuntimeError as error:
+        _fail(error.code, str(error))
+    typer.echo(result.model_dump_json(indent=2))
+
+
+@app.command("investigation-trace")
+def investigation_trace(run_id: Annotated[str, typer.Argument()]) -> None:
+    settings = _load_settings()
+    try:
+        trace = AgentInvestigationService(Database(settings.database_url), settings).trace(run_id)
+    except AgentRuntimeError as error:
+        _fail(error.code, str(error))
+    typer.echo(json.dumps(trace, ensure_ascii=False, indent=2))
 
 
 @app.command("policy-validate")
