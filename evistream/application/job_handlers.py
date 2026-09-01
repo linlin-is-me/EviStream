@@ -1,11 +1,15 @@
 """Shared job handlers used by inline and future queued dispatchers."""
 
 import asyncio
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from evistream.application.types import JobHandlerError, JobRequest
 
 if TYPE_CHECKING:
+    from evistream.agent.engine import InvestigationEngine
+    from evistream.agent.service import AgentInvestigationService
+    from evistream.agent.types import InvestigationState
     from evistream.media.service import MediaApplicationService
 
 
@@ -40,3 +44,35 @@ class MediaPreprocessJobHandler:
             "status": job.status,
             "attempt": job.attempt,
         }
+
+
+class AgentInvestigationJobHandler:
+    def __init__(
+        self,
+        service: "AgentInvestigationService",
+        engine_factory: Callable[["InvestigationState"], "InvestigationEngine"],
+    ) -> None:
+        self._service = service
+        self._engine_factory = engine_factory
+
+    async def handle(self, request: JobRequest) -> dict[str, Any]:
+        from evistream.agent.errors import AgentRuntimeError
+        from evistream.agent.types import InvestigationResult
+
+        if request.job_type != "AGENT_INVESTIGATION":
+            raise JobHandlerError("JOB_INVALID", "unexpected Agent job type")
+        run_id = request.payload.get("run_id")
+        if not isinstance(run_id, str):
+            raise JobHandlerError("AGENT_CHECKPOINT_INVALID", "request has no run ID")
+        claimed = False
+        try:
+            state = self._service.claim(request)
+            if isinstance(state, InvestigationResult):
+                return state.model_dump(mode="json")
+            claimed = True
+            result = await self._engine_factory(state).run(state, request.correlation_id)
+            return result.model_dump(mode="json")
+        except AgentRuntimeError as error:
+            if claimed and error.code != "AGENT_STATE_CONFLICT":
+                self._service.fail(run_id, error.code)
+            raise JobHandlerError(error.code, str(error)) from error
