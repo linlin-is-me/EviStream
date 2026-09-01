@@ -1,8 +1,11 @@
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from typer.testing import CliRunner
 
+from evistream.agent.types import InvestigationResult, InvestigationStatus
+from evistream.application import JobExecution, JobRequest, JobStatus
 from evistream.cli import app
 from evistream.media.probe import MediaProbeResult
 from evistream.models import MockEmbeddingGateway
@@ -114,3 +117,48 @@ def test_retrieval_index_returns_nonzero_for_partial_indexing() -> None:
     assert result.exit_code == 1
     assert '"status": "partial"' in result.stdout
     assert "EMBEDDING_INDEX_PARTIAL" in result.stdout
+
+
+def test_investigate_cli_treats_human_review_as_success() -> None:
+    request = JobRequest(
+        job_id="job",
+        job_type="AGENT_INVESTIGATION",
+        request_key="key",
+        correlation_id="correlation",
+        payload={"run_id": "run", "case_id": "case", "model_profile": "mock"},
+    )
+    investigation = InvestigationResult(
+        run_id="run",
+        job_id="job",
+        case_id="case",
+        status=InvestigationStatus.NEEDS_HUMAN_REVIEW,
+        stop_reason="REQUIRED_EVIDENCE_MISSING",
+        state_version=5,
+    )
+    service = MagicMock()
+    service.prepare.return_value = request
+    service.get_result.return_value = investigation
+    dispatcher = MagicMock()
+    dispatcher.dispatch = AsyncMock(
+        return_value=JobExecution(
+            job_id="job",
+            job_type="AGENT_INVESTIGATION",
+            status=JobStatus.SUCCEEDED,
+            result=investigation.model_dump(mode="json"),
+            elapsed_ms=1,
+        )
+    )
+    runtime = SimpleNamespace(service=service, dispatcher=dispatcher)
+    database = MagicMock()
+    database.session.return_value.__enter__.return_value.get.return_value = SimpleNamespace(
+        model_profile="mock"
+    )
+    with (
+        patch("evistream.cli.Database", return_value=database),
+        patch("evistream.cli.build_agent_runtime", return_value=runtime),
+    ):
+        result = runner.invoke(app, ["investigate", "case"])
+
+    assert result.exit_code == 0
+    assert '"status": "NEEDS_HUMAN_REVIEW"' in result.stdout
+    assert "REQUIRED_EVIDENCE_MISSING" in result.stdout

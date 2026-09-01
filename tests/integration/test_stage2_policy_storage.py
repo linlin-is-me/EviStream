@@ -17,6 +17,7 @@ from evistream.policies.versioning import (
 )
 from evistream.storage.database import Database, utc_now
 from evistream.storage.models import (
+    AgentRunRecord,
     ArtifactRecord,
     CaseRecord,
     DecisionEvidenceRecord,
@@ -160,8 +161,13 @@ def test_demo_seed_apply_is_transactional_and_idempotent(tmp_path) -> None:
     )
     assert len(first.materialized_case_ids) == 9
     assert second.materialized_case_ids == first.materialized_case_ids
+    policy_ids = {item.policy_id for item in manifest.cases}
     with database.session() as session:
-        assert session.scalar(select(func.count()).select_from(PolicyRecord)) == 3
+        assert session.scalar(
+            select(func.count())
+            .select_from(PolicyRecord)
+            .where(PolicyRecord.policy_id.in_(policy_ids))
+        ) == 3
         assert session.scalar(
             select(func.count())
             .select_from(CaseRecord)
@@ -289,6 +295,35 @@ def test_audit_records_and_cross_case_relationships_are_database_enforced() -> N
                     tool_capabilities=["search_transcript"],
                     semantic_sha256="2" * 64,
                     status="PENDING",
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+        session.flush()
+        for number in [1, 2]:
+            session.add(
+                AgentRunRecord(
+                    id=f"run_{number}_{suffix}",
+                    run_kind="MANUAL_TOOL",
+                    job_id=None,
+                    case_id=ids[f"case{number}"],
+                    model_profile="mock",
+                    current_node=None,
+                    next_node=None,
+                    state_snapshot={},
+                    state_version=0,
+                    status="COMPLETED",
+                    iteration=0,
+                    vlm_calls=0,
+                    consecutive_tool_failures=0,
+                    total_tool_failures=0,
+                    stagnant_iterations=0,
+                    deadline_at=None,
+                    last_checkpoint_at=now,
+                    lease_until=None,
+                    provisional_verdict=None,
+                    stop_reason="MANUAL_TOOL",
+                    result_payload={},
                     created_at=now,
                     updated_at=now,
                 )

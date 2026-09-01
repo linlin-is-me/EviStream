@@ -1,0 +1,24 @@
+PlanOutput:
+  - hypothesis:
+      requirement_id: req_stage4_insufficient
+      statement: Search for evidence that is absent from the fixture
+      confidence: 0.3
+    action:
+      requirement_id: req_stage4_insufficient
+      tool_name: search_transcript
+      query: absent signal
+      start_ms: null
+      end_ms: null
+      limit: 5
+      rationale: Controlled empty retrieval
+ChallengeOutput:
+  - actions: []
+    unresolved_exception: true
+    contradictory_evidence: false
+    continue_investigation: false
+    rationale: No controlled evidence is available
+ProvisionalDecision:
+  - verdict: NEEDS_HUMAN_REVIEW
+    reason_code: CONTROLLED_INSUFFICIENT
+    explanation: The controlled fixture has no relevant evidence
+    evidence_ids: []

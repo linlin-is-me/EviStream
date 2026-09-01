@@ -1,4 +1,4 @@
-.PHONY: doctor dev-infra dev-infra-down migrate verify-stage1 verify-stage2 verify-stage3
+.PHONY: doctor dev-infra dev-infra-down migrate verify-stage1 verify-stage2 verify-stage3 verify-stage4
 
 PYTHON ?= python3.11
 
@@ -22,3 +22,6 @@ verify-stage2:
 
 verify-stage3:
 	$(PYTHON) scripts/run_stage_verification.py stage3
+
+verify-stage4:
+	$(PYTHON) scripts/run_stage_verification.py stage4
