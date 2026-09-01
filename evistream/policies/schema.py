@@ -147,11 +147,21 @@ def load_policy(path: Path) -> LoadedPolicy:
         raise PolicyError("policy exceeds the 256 KiB limit")
     try:
         source = raw.decode("utf-8")
+        return load_policy_source(source)
+    except (UnicodeDecodeError, yaml.YAMLError, ValidationError, ValueError) as error:
+        raise PolicyError(str(error)) from error
+
+
+def load_policy_source(source: str) -> LoadedPolicy:
+    raw = source.encode("utf-8")
+    if len(raw) > MAX_POLICY_BYTES:
+        raise PolicyError("policy exceeds the 256 KiB limit")
+    try:
         payload = yaml.load(source, Loader=DuplicateKeySafeLoader)
         if not isinstance(payload, dict):
             raise ValueError("policy root must be a mapping")
         document = PolicyDocument.model_validate(payload)
-    except (UnicodeDecodeError, yaml.YAMLError, ValidationError, ValueError) as error:
+    except (yaml.YAMLError, ValidationError, ValueError) as error:
         raise PolicyError(str(error)) from error
     return LoadedPolicy(
         document=document,
