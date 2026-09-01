@@ -13,6 +13,7 @@ from evistream.media.extractors import OCRAdapter, VisualDescriptionAdapter
 from evistream.media.probe import probe_video
 from evistream.media.segmenter import FFmpegSceneSegmenter, FixedWindowSegmenter, extract_keyframe
 from evistream.media.types import ArtifactType, MediaJob, SegmentBoundary, Video, VideoStatus
+from evistream.retrieval.text import normalize_text, search_lexemes
 from evistream.storage.artifacts import LocalArtifactStore
 from evistream.storage.database import Database, utc_now
 from evistream.storage.models import (
@@ -260,6 +261,8 @@ class MediaApplicationService:
                             start_ms=boundary.start_ms,
                             end_ms=boundary.end_ms,
                             text=observation.text,
+                            normalized_text=normalize_text(observation.text),
+                            keyword_lexemes=search_lexemes(observation.text),
                             created_at=now,
                             updated_at=now,
                         )
@@ -290,6 +293,8 @@ class MediaApplicationService:
                         start_ms=item.start_ms,
                         end_ms=item.end_ms,
                         text=item.text,
+                        normalized_text=normalize_text(item.text),
+                        keyword_lexemes=search_lexemes(item.text),
                         created_at=now,
                         updated_at=now,
                     )
