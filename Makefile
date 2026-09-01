@@ -15,19 +15,10 @@ migrate:
 	alembic upgrade head
 
 verify-stage1:
-	alembic upgrade head
-	pytest tests/unit tests/integration -m "not external"
+	$(PYTHON) scripts/run_stage_verification.py stage1
 
 verify-stage2:
-	alembic upgrade head
-	evistream policy-validate configs/policies/violence-weapon-v1.yaml
-	evistream policy-validate configs/policies/dangerous-behavior-v1.yaml
-	evistream policy-validate configs/policies/tobacco-alcohol-v1.yaml
-	evistream seed-demo --check
-	pytest
+	$(PYTHON) scripts/run_stage_verification.py stage2
 
 verify-stage3:
-	alembic upgrade head
-	$(PYTHON) scripts/verify_stage3_migrations.py
-	evistream embedding-smoke --profile mock
-	pytest
+	$(PYTHON) scripts/run_stage_verification.py stage3

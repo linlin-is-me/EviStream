@@ -4,6 +4,7 @@ from evistream.retrieval.indexing import EmbeddingIndexService, embedding_space_
 from evistream.retrieval.service import HybridRetrievalService
 from evistream.retrieval.text import normalize_text, search_lexemes
 from evistream.retrieval.types import (
+    IndexFailure,
     IndexSummary,
     RetrievalHit,
     RetrievalRequest,
@@ -13,6 +14,7 @@ from evistream.retrieval.types import (
 __all__ = [
     "EmbeddingIndexService",
     "HybridRetrievalService",
+    "IndexFailure",
     "IndexSummary",
     "RetrievalHit",
     "RetrievalRequest",

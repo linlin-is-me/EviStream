@@ -45,7 +45,16 @@ class RetrievalResult(BaseModel):
     error_code: str | None = None
 
 
+class IndexFailure(BaseModel):
+    batch_index: int = Field(ge=0)
+    document_ids: list[str]
+    error_code: str
+    retryable: bool
+
+
 class IndexSummary(BaseModel):
+    status: Literal["success", "partial", "failed"]
+    error_code: str | None = None
     video_id: str
     total: int = Field(ge=0)
     indexed: int = Field(ge=0)
@@ -55,3 +64,4 @@ class IndexSummary(BaseModel):
     embedding_space: str
     dimensions: int = Field(gt=0)
     prompt_tokens: int = Field(ge=0)
+    failures: list[IndexFailure] = Field(default_factory=list)

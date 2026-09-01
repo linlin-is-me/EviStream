@@ -7,8 +7,9 @@ from sqlalchemy import select
 
 from evistream.models.embedding_types import EmbeddingGateway, EmbeddingRequest
 from evistream.models.profiles import ResolvedEmbeddingProfile
+from evistream.models.types import ModelError
 from evistream.retrieval.text import normalize_text, search_lexemes
-from evistream.retrieval.types import IndexSummary
+from evistream.retrieval.types import IndexFailure, IndexSummary
 from evistream.storage.database import Database, utc_now
 from evistream.storage.models import SearchDocumentRecord, VideoRecord
 
@@ -68,6 +69,7 @@ class EmbeddingIndexService:
         indexed = 0
         failed = 0
         prompt_tokens = 0
+        failures: list[IndexFailure] = []
         actual_model = self.profile.model
         batch_size = self.profile.batch_size
         for offset in range(0, len(pending), batch_size):
@@ -81,8 +83,16 @@ class EmbeddingIndexService:
                         trace_id=f"index-{video_id}-{offset // batch_size}",
                     )
                 )
-            except Exception:
+            except ModelError as error:
                 failed += len(batch)
+                failures.append(
+                    IndexFailure(
+                        batch_index=offset // batch_size,
+                        document_ids=[document_id for document_id, _, _ in batch],
+                        error_code=str(error.code),
+                        retryable=error.retryable,
+                    )
+                )
                 continue
             prompt_tokens += response.usage.prompt_tokens
             actual_model = response.actual_model
@@ -93,6 +103,14 @@ class EmbeddingIndexService:
                     record = session.get(SearchDocumentRecord, document_id)
                     if record is None or record.text != source_text:
                         failed += 1
+                        failures.append(
+                            IndexFailure(
+                                batch_index=offset // batch_size,
+                                document_ids=[document_id],
+                                error_code="INDEX_SOURCE_CHANGED",
+                                retryable=True,
+                            )
+                        )
                         continue
                     record.embedding = vector.values
                     record.embedding_space = self.space
@@ -100,7 +118,18 @@ class EmbeddingIndexService:
                     record.embedding_source_sha256 = source_hash
                     record.embedding_updated_at = utc_now()
                     indexed += 1
+        status = "success"
+        error_code = None
+        if failed:
+            status = "partial" if indexed or skipped else "failed"
+            error_code = (
+                "EMBEDDING_INDEX_PARTIAL"
+                if status == "partial"
+                else "EMBEDDING_INDEX_FAILED"
+            )
         return IndexSummary(
+            status=status,
+            error_code=error_code,
             video_id=video_id,
             total=len(snapshots),
             indexed=indexed,
@@ -110,4 +139,5 @@ class EmbeddingIndexService:
             embedding_space=self.space,
             dimensions=self.profile.dimensions,
             prompt_tokens=prompt_tokens,
+            failures=failures,
         )

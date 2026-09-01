@@ -18,9 +18,8 @@ from evistream.application import (
 )
 from evistream.config import Settings, get_settings
 from evistream.media.asr import ASRAdapter, ASRRequest, FasterWhisperASR, MockASR
-from evistream.media.extractors import MockOCR, MockVisualDescription
 from evistream.media.probe import MediaProbeError, probe_video
-from evistream.media.service import MediaApplicationService
+from evistream.media.runtime import MediaAdapterUnavailable, build_media_runtime
 from evistream.models import (
     EmbeddingRequest,
     ModelError,
@@ -177,11 +176,19 @@ def media_ingest(
     path: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],
     process: Annotated[bool, typer.Option(help="Run preprocessing immediately.")] = False,
 ) -> None:
-    service = _media_service(_load_settings())
-    video, job = service.register_file(path)
+    try:
+        runtime = build_media_runtime(_load_settings())
+    except MediaAdapterUnavailable as error:
+        _fail(error.code, str(error))
+    video, job = runtime.service.register_file(path)
     if process:
-        job = service.process_job(job.job_id)
-        video = service.get_video(video.video_id)
+        execution = asyncio.run(
+            runtime.dispatcher.dispatch(runtime.service.build_job_request(job.job_id))
+        )
+        job = runtime.service.get_job(job.job_id)
+        video = runtime.service.get_video(video.video_id)
+        if execution.error_code:
+            _fail(execution.error_code, execution.error_message or "media job failed")
     typer.echo(
         json.dumps(
             {"video": video.model_dump(mode="json"), "job": job.model_dump(mode="json")},
@@ -193,8 +200,18 @@ def media_ingest(
 
 @app.command("media-process")
 def media_process(job_id: Annotated[str, typer.Argument()]) -> None:
-    service = _media_service(_load_settings())
-    job = service.process_job(job_id)
+    try:
+        runtime = build_media_runtime(_load_settings())
+        execution = asyncio.run(
+            runtime.dispatcher.dispatch(runtime.service.build_job_request(job_id))
+        )
+    except MediaAdapterUnavailable as error:
+        _fail(error.code, str(error))
+    except LookupError:
+        _fail("JOB_NOT_FOUND", f"job not found: {job_id}")
+    if execution.error_code:
+        _fail(execution.error_code, execution.error_message or "media job failed")
+    job = runtime.service.get_job(job_id)
     typer.echo(job.model_dump_json(indent=2))
 
 
@@ -220,6 +237,8 @@ def retrieval_index(
     except LookupError:
         _fail("VIDEO_NOT_FOUND", f"video not found: {video_id}")
     typer.echo(summary.model_dump_json(indent=2))
+    if summary.status != "success":
+        raise typer.Exit(code=1)
 
 
 @app.command("tool-run")
@@ -365,17 +384,6 @@ def _load_settings() -> Settings:
     load_dotenv()
     get_settings.cache_clear()
     return get_settings()
-
-
-def _media_service(settings: Settings) -> MediaApplicationService:
-    return MediaApplicationService(
-        Database(settings.database_url),
-        LocalArtifactStore(settings.artifact_root),
-        settings,
-        MockASR(),
-        MockOCR(),
-        MockVisualDescription(),
-    )
 
 
 def _fail(code: object, message: str) -> NoReturn:
