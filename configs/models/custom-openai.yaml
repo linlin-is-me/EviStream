@@ -7,14 +7,16 @@ models:
   triage_env: EVISTREAM_TRIAGE_MODEL
   verifier_env: EVISTREAM_VERIFY_MODEL
   judge_env: EVISTREAM_JUDGE_MODEL
+  embedding_env: EVISTREAM_EMBEDDING_MODEL
 defaults:
   temperature: 0
   timeout_seconds: 30
   structured_output: true
   max_attempts: 2
+  embedding_dimensions: 1536
+  embedding_batch_size: 10
 capabilities:
   text: true
   image: false
   video: false
   structured_output: true
-
