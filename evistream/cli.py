@@ -4,6 +4,7 @@ import asyncio
 import json
 from pathlib import Path
 from typing import Annotated, NoReturn
+from uuid import uuid4
 
 import typer
 from dotenv import load_dotenv
@@ -21,20 +22,25 @@ from evistream.media.extractors import MockOCR, MockVisualDescription
 from evistream.media.probe import MediaProbeError, probe_video
 from evistream.media.service import MediaApplicationService
 from evistream.models import (
+    EmbeddingRequest,
     ModelError,
     ModelMessage,
     ModelRequest,
     ModelRole,
     build_model_gateway,
+    resolve_embedding_gateway,
 )
 from evistream.policies.compiler import PolicyCompiler
 from evistream.policies.schema import PolicyError, load_policy
 from evistream.policies.seeds import apply_demo_seeds, validate_demo_seeds
 from evistream.policies.versioning import PolicyVersionError, PolicyVersionService
+from evistream.retrieval import EmbeddingIndexService, HybridRetrievalService
 from evistream.storage.artifacts import LocalArtifactStore
 from evistream.storage.database import Database
+from evistream.storage.models import CaseRecord
+from evistream.tools import ToolExecutor, ToolRequest, build_default_registry
 
-app = typer.Typer(no_args_is_help=True, help="EviStream Stage 0 verification commands.")
+app = typer.Typer(no_args_is_help=True, help="EviStream verification and development commands.")
 
 
 class SmokeOutput(BaseModel):
@@ -127,6 +133,45 @@ def asr_smoke(
     typer.echo(result.model_dump_json(indent=2))
 
 
+@app.command("embedding-smoke")
+def embedding_smoke(
+    profile: Annotated[str | None, typer.Option(help="Model profile from configs/models.")] = None,
+) -> None:
+    settings = _load_settings()
+    selected_profile = profile or settings.model_profile
+    try:
+        gateway, resolved = resolve_embedding_gateway(
+            settings.model_config_dir, selected_profile
+        )
+        response = asyncio.run(
+            gateway.embed(
+                EmbeddingRequest(
+                    texts=("EviStream evidence retrieval",),
+                    dimensions=resolved.dimensions,
+                    timeout_seconds=resolved.timeout_seconds,
+                    trace_id="stage3-embedding-smoke",
+                )
+            )
+        )
+    except ModelError as error:
+        _fail(error.code, str(error))
+    typer.echo(
+        json.dumps(
+            {
+                "ok": True,
+                "profile": selected_profile,
+                "actual_model": response.actual_model,
+                "dimensions": len(response.vectors[0].values),
+                "usage": response.usage.model_dump(mode="json"),
+                "latency_ms": response.latency_ms,
+                "provider_request_id": response.provider_request_id,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+
+
 @app.command("media-ingest")
 def media_ingest(
     path: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],
@@ -151,6 +196,80 @@ def media_process(job_id: Annotated[str, typer.Argument()]) -> None:
     service = _media_service(_load_settings())
     job = service.process_job(job_id)
     typer.echo(job.model_dump_json(indent=2))
+
+
+@app.command("retrieval-index")
+def retrieval_index(
+    video_id: Annotated[str, typer.Argument()],
+    profile: Annotated[str | None, typer.Option(help="Embedding model profile.")] = None,
+    force: Annotated[bool, typer.Option(help="Refresh vectors even when current.")] = False,
+) -> None:
+    settings = _load_settings()
+    selected_profile = profile or settings.model_profile
+    try:
+        gateway, resolved = resolve_embedding_gateway(
+            settings.model_config_dir, selected_profile
+        )
+        summary = asyncio.run(
+            EmbeddingIndexService(
+                Database(settings.database_url), gateway, resolved
+            ).index_video(video_id, force=force)
+        )
+    except ModelError as error:
+        _fail(error.code, str(error))
+    except LookupError:
+        _fail("VIDEO_NOT_FOUND", f"video not found: {video_id}")
+    typer.echo(summary.model_dump_json(indent=2))
+
+
+@app.command("tool-run")
+def tool_run(
+    tool_name: Annotated[str, typer.Argument()],
+    case_id: Annotated[str, typer.Option()],
+    requirement_id: Annotated[str, typer.Option()],
+    query: Annotated[str, typer.Option()] = "",
+    start_ms: Annotated[int | None, typer.Option()] = None,
+    end_ms: Annotated[int | None, typer.Option()] = None,
+    limit: Annotated[int, typer.Option(min=1, max=50)] = 5,
+) -> None:
+    settings = _load_settings()
+    database = Database(settings.database_url)
+    with database.session() as session:
+        case = session.get(CaseRecord, case_id)
+        profile_name = case.model_profile if case is not None else settings.model_profile
+    try:
+        gateway, resolved = resolve_embedding_gateway(
+            settings.model_config_dir, profile_name
+        )
+        retrieval = HybridRetrievalService(
+            database,
+            gateway,
+            resolved,
+            rrf_k=settings.retrieval_rrf_k,
+            candidate_limit=settings.retrieval_candidate_limit,
+        )
+        registry = build_default_registry(
+            database,
+            LocalArtifactStore(settings.artifact_root),
+            settings,
+            retrieval,
+        )
+        request = ToolRequest(
+            correlation_id=f"corr_{uuid4().hex}",
+            run_id=f"manual_{uuid4().hex}",
+            case_id=case_id,
+            requirement_id=requirement_id,
+            query=query,
+            start_ms=start_ms,
+            end_ms=end_ms,
+            limit=limit,
+        )
+        result = asyncio.run(ToolExecutor(database, registry).execute(tool_name, request))
+    except ModelError as error:
+        _fail(error.code, str(error))
+    typer.echo(result.model_dump_json(indent=2))
+    if result.status == "failed":
+        raise typer.Exit(code=1)
 
 
 @app.command("policy-validate")
