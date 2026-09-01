@@ -10,7 +10,8 @@ from evistream.media.extractors import (
     MockVisualDescription,
 )
 from evistream.media.runtime import MediaAdapterUnavailable, build_media_runtime
-from evistream.models import MockGateway
+from evistream.models import MockEmbeddingGateway, MockGateway
+from evistream.models.profiles import ResolvedEmbeddingProfile
 
 
 def test_media_runtime_defaults_to_deterministic_adapters(tmp_path) -> None:
@@ -32,6 +33,17 @@ def test_media_runtime_selects_configured_real_adapters(tmp_path) -> None:
         model_profile="dashscope-test",
         _env_file=None,
     )
+    embedding_profile = ResolvedEmbeddingProfile(
+        name="mock",
+        gateway="mock",
+        base_url=None,
+        api_key=None,
+        model="mock-embedding-v1",
+        dimensions=1536,
+        batch_size=10,
+        timeout_seconds=30,
+        max_attempts=1,
+    )
     with (
         patch(
             "evistream.media.runtime.IsolatedFasterWhisperASR", return_value=MockASR()
@@ -41,6 +53,10 @@ def test_media_runtime_selects_configured_real_adapters(tmp_path) -> None:
             "evistream.media.runtime.build_model_gateway",
             return_value=MockGateway(),
         ) as gateway,
+        patch(
+            "evistream.media.runtime.resolve_embedding_gateway",
+            return_value=(MockEmbeddingGateway(), embedding_profile),
+        ) as embedding,
     ):
         runtime = build_media_runtime(settings)
 
@@ -49,6 +65,7 @@ def test_media_runtime_selects_configured_real_adapters(tmp_path) -> None:
     )
     ocr.assert_called_once_with("en")
     gateway.assert_called_once()
+    embedding.assert_called_once()
     assert isinstance(runtime.service.vision, GatewayVisualDescription)
 
 

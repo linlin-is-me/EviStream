@@ -4,24 +4,29 @@ import App from './App'
 
 afterEach(() => vi.restoreAllMocks())
 
-describe('App', () => {
-  it('shows the healthy API response', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ status: 'ok', service: 'evistream-api', version: '0.1.0.dev0', mode: 'test' }),
+describe('Stage 6 console', () => {
+  it('loads model profiles and videos in the task center', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      return {
+        ok: true,
+        json: async () => url.includes('model-profiles')
+          ? { items: [{ name: 'mock', gateway: 'mock', configured: true, models: {} }], next_cursor: null }
+          : { items: [{ video_id: 'vid_1', original_name: 'sample.mp4', status: 'READY', triage_status: 'SUCCEEDED', model_profile: 'mock', duration_ms: 30000 }], next_cursor: null },
+      }
     }))
-
     render(<App />)
-    expect(screen.getByText('Checking API health…')).toBeInTheDocument()
-    await waitFor(() => expect(screen.getByText('API operational')).toBeInTheDocument())
-    expect(screen.getByText('0.1.0.dev0')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '任务中心' })).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByText('sample.mp4')).toBeInTheDocument())
+    expect(screen.getByRole('option', { name: 'mock · mock' })).toBeInTheDocument()
   })
 
-  it('shows a useful failure state', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('connection refused')))
+  it('shows API errors without hiding the workspace', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      json: async () => ({ error_code: 'QUEUE_UNAVAILABLE', message: 'offline' }),
+    }))
     render(<App />)
-    await waitFor(() => expect(screen.getByText('API unavailable')).toBeInTheDocument())
-    expect(screen.getByText('connection refused')).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('QUEUE_UNAVAILABLE'))
   })
 })
-

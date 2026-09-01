@@ -7,6 +7,11 @@ follow Semantic Versioning.
 
 ### Added
 
+- Stage 6 automatic Triage, persisted RQ dispatch, retries, leases and Redis-loss recovery.
+- Video, job, case, governance, policy, model-profile and Replay HTTP APIs.
+- Task center, Case workspace, policy and Replay React workspaces.
+- Full Mock Compose deployment with migration, API, Worker, PostgreSQL, Redis and Nginx Web.
+- Structured single-line API and Worker logs and layered readiness checks.
 - Stage 5 Evidence aggregation, three-valued rule evaluation, and formal machine Decisions.
 - Append-only human Reviews, Appeals, Case timelines, and current audit pointers.
 - Policy diff, selective reevaluation or reinvestigation, replay lineage, and replay CLI commands.

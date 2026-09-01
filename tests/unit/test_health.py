@@ -27,4 +27,22 @@ def test_upload_rejects_body_while_streaming_before_runtime_construction() -> No
     )
 
     assert response.status_code == 422
-    assert response.json()["detail"] == "uploaded file exceeds configured limit"
+    assert response.json()["error_code"] == "INPUT_INVALID"
+    assert response.json()["message"] == "uploaded file exceeds configured limit"
+    assert response.headers["x-correlation-id"].startswith("corr_")
+
+
+def test_stage6_openapi_exposes_public_workflow_routes() -> None:
+    app = create_app(Settings(environment="test", _env_file=None))
+    schema = app.openapi()
+
+    expected_paths = {
+        "/api/v1/videos",
+        "/api/v1/jobs/{job_id}",
+        "/api/v1/cases/{case_id}/investigate",
+        "/api/v1/cases/{case_id}/reviews",
+        "/api/v1/cases/{case_id}/appeals",
+        "/api/v1/policies/{policy_id}/replay/preview",
+        "/api/v1/model-profiles/{profile}/health",
+    }
+    assert expected_paths <= set(schema["paths"])

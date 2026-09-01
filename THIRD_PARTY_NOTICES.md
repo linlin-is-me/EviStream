@@ -22,9 +22,14 @@ No source code from these projects is copied into EviStream.
 | FFmpeg | LGPL-2.1-or-later / configured components | Media probing and fixture generation |
 | PyYAML | MIT | Policy and model-profile parsing |
 | Typer | MIT | Command-line interface |
-| React | MIT | Web status page |
+| React | MIT | Web application |
+| React Router | MIT | Browser workspace routing |
 | Vite | MIT | Frontend development and build |
 | Vitest | MIT | Frontend tests |
+| Redis | BSD-3-Clause | Disposable task queue state |
+| redis-py | MIT | Redis client |
+| RQ | BSD-2-Clause | Asynchronous job execution and scheduling |
+| Nginx | BSD-2-Clause | Static Web delivery and API reverse proxy |
 
 Exact package versions are recorded by the Python environment and `apps/web/pnpm-lock.yaml`.
 Optional model weights retain their publishers' own terms and are downloaded to local caches;

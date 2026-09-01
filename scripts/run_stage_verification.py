@@ -24,7 +24,7 @@ DATABASE_PREFIX = "evistream_verify_"
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "stage", choices=["stage1", "stage2", "stage3", "stage4", "stage5"]
+        "stage", choices=["stage1", "stage2", "stage3", "stage4", "stage5", "stage6"]
     )
     arguments = parser.parse_args()
     source = make_url(get_settings().database_url)
@@ -56,11 +56,15 @@ def main() -> None:
 
 
 def _run_migrations(stage: str, root: Path, environment: dict[str, str]) -> None:
-    if stage == "stage5":
-        stage4_revision = "0005_stage4_agent_runtime"
-        _run([sys.executable, "-m", "alembic", "upgrade", stage4_revision], root, environment)
+    if stage in {"stage5", "stage6"}:
+        previous_revision = (
+            "0006_stage5_governance_replay"
+            if stage == "stage6"
+            else "0005_stage4_agent_runtime"
+        )
+        _run([sys.executable, "-m", "alembic", "upgrade", previous_revision], root, environment)
         _run([sys.executable, "-m", "alembic", "upgrade", "head"], root, environment)
-        _run([sys.executable, "-m", "alembic", "downgrade", stage4_revision], root, environment)
+        _run([sys.executable, "-m", "alembic", "downgrade", previous_revision], root, environment)
         _run([sys.executable, "-m", "alembic", "upgrade", "head"], root, environment)
         return
     if stage == "stage4":
@@ -81,7 +85,7 @@ def _run_migrations(stage: str, root: Path, environment: dict[str, str]) -> None
         _run([sys.executable, "-m", "alembic", "upgrade", "head"], root, environment)
         _verify_legacy_backfill(environment["EVISTREAM_DATABASE_URL"], legacy_run_id)
         return
-    revisions = (
+    revisions: tuple[list[str], ...] = (
         ["upgrade", "0002_stage2_domain"],
         ["upgrade", "head"],
         ["downgrade", "0002_stage2_domain"],
@@ -96,7 +100,7 @@ def _run_migrations(stage: str, root: Path, environment: dict[str, str]) -> None
 def _run_checks(stage: str, root: Path, environment: dict[str, str]) -> None:
     _run([sys.executable, "-m", "ruff", "check", "."], root, environment)
     _run([sys.executable, "-m", "mypy", "evistream", "apps"], root, environment)
-    if stage in {"stage2", "stage3", "stage4", "stage5"}:
+    if stage in {"stage2", "stage3", "stage4", "stage5", "stage6"}:
         for policy in [
             "violence-weapon-v1.yaml",
             "dangerous-behavior-v1.yaml",
@@ -118,7 +122,7 @@ def _run_checks(stage: str, root: Path, environment: dict[str, str]) -> None:
             root,
             environment,
         )
-    if stage in {"stage3", "stage4", "stage5"}:
+    if stage in {"stage3", "stage4", "stage5", "stage6"}:
         _run(
             [
                 sys.executable,
@@ -131,7 +135,7 @@ def _run_checks(stage: str, root: Path, environment: dict[str, str]) -> None:
             root,
             environment,
         )
-    if stage in {"stage4", "stage5"}:
+    if stage in {"stage4", "stage5", "stage6"}:
         _run([sys.executable, "scripts/seed_stage4_fixtures.py"], root, environment)
         for scenario in ["obvious", "cross-segment", "insufficient"]:
             case_suffix = scenario.replace("-", "_")
@@ -158,7 +162,7 @@ def _run_checks(stage: str, root: Path, environment: dict[str, str]) -> None:
                 stage_environment,
             )
         _verify_stage4_paths(environment["EVISTREAM_DATABASE_URL"], root, environment)
-        if stage == "stage5":
+        if stage in {"stage5", "stage6"}:
             _verify_stage5_governance(root, environment)
     _run([sys.executable, "-m", "pytest"], root, environment)
 
@@ -245,11 +249,14 @@ def _verify_stage4_paths(
             ).fetchone()
             if row is None or row[1] != status:
                 raise RuntimeError(f"Stage 4 fixture did not reach {status}: {case_id}")
-            count = connection.execute(
+            count_row = connection.execute(
                 "SELECT count(*) FROM evidence e JOIN model_calls m ON m.id = e.model_call_id "
                 "WHERE m.run_id = %s",
                 (row[0],),
-            ).fetchone()[0]
+            ).fetchone()
+            if count_row is None:
+                raise RuntimeError(f"Stage 4 fixture evidence count missing: {case_id}")
+            count = count_row[0]
             if count != evidence_count:
                 raise RuntimeError(f"Stage 4 fixture evidence count mismatch: {case_id}")
             status_payload = _run_json(
@@ -389,7 +396,10 @@ def _source_sentinel(source: URL, suffix: str) -> Iterator[None]:
     sentinel_id = f"vid_verify_sentinel_{suffix}"
     inserted = False
     with _database_connection(source) as connection:
-        exists = connection.execute("SELECT to_regclass('public.videos')").fetchone()[0]
+        exists_row = connection.execute(
+            "SELECT to_regclass('public.videos')"
+        ).fetchone()
+        exists = exists_row[0] if exists_row is not None else None
         if exists:
             connection.execute(
                 "INSERT INTO videos (id, original_name, artifact_uri, fingerprint, duration_ms, "

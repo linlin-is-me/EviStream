@@ -48,6 +48,8 @@ class VideoRecord(TimestampMixin, Base):
     has_audio: Mapped[bool]
     audio_codec: Mapped[str | None] = mapped_column(String(64))
     status: Mapped[str] = mapped_column(String(32), index=True)
+    model_profile: Mapped[str] = mapped_column(String(128), default="mock")
+    triage_status: Mapped[str] = mapped_column(String(32), default="PENDING", index=True)
 
 
 class SegmentRecord(TimestampMixin, Base):
@@ -112,6 +114,11 @@ class ProcessingJobRecord(TimestampMixin, Base):
     attempt: Mapped[int] = mapped_column(Integer, default=0)
     max_attempts: Mapped[int] = mapped_column(Integer, default=3)
     error_code: Mapped[str | None] = mapped_column(String(64))
+    error_message: Mapped[str | None] = mapped_column(Text)
+    retryable: Mapped[bool] = mapped_column(default=False)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_enqueued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -459,11 +466,28 @@ class ModelCallRecord(TimestampMixin, Base):
     __tablename__ = "model_calls"
     __table_args__ = (
         UniqueConstraint("id", "case_id"),
-        Index("uq_model_calls_run_request", "run_id", "request_key", unique=True),
+        Index(
+            "uq_model_calls_run_request",
+            "run_id",
+            "request_key",
+            unique=True,
+        ),
+        Index(
+            "uq_model_calls_video_request",
+            "video_id",
+            "request_key",
+            unique=True,
+            postgresql_where=text("video_id IS NOT NULL"),
+        ),
         ForeignKeyConstraint(
             ["run_id", "case_id"],
             ["agent_runs.id", "agent_runs.case_id"],
             ondelete="RESTRICT",
+        ),
+        CheckConstraint(
+            "(run_id IS NOT NULL AND case_id IS NOT NULL AND video_id IS NULL) OR "
+            "(run_id IS NULL AND case_id IS NULL AND video_id IS NOT NULL)",
+            name="ck_model_calls_scope",
         ),
     )
 
@@ -471,8 +495,11 @@ class ModelCallRecord(TimestampMixin, Base):
     job_id: Mapped[str | None] = mapped_column(
         ForeignKey("processing_jobs.id", ondelete="RESTRICT"), index=True
     )
-    run_id: Mapped[str] = mapped_column(String(64), index=True)
-    case_id: Mapped[str] = mapped_column(String(64), index=True)
+    run_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    case_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    video_id: Mapped[str | None] = mapped_column(
+        ForeignKey("videos.id", ondelete="RESTRICT"), index=True
+    )
     node: Mapped[str] = mapped_column(String(24), index=True)
     state_version: Mapped[int] = mapped_column(Integer)
     role: Mapped[str] = mapped_column(String(24))
@@ -490,6 +517,57 @@ class ModelCallRecord(TimestampMixin, Base):
     total_tokens: Mapped[int] = mapped_column(Integer, default=0)
     latency_ms: Mapped[int] = mapped_column(Integer, default=0)
     provider_request_id: Mapped[str | None] = mapped_column(String(255))
+    error_code: Mapped[str | None] = mapped_column(String(64))
+
+
+class VideoTriageCheckRecord(TimestampMixin, Base):
+    __tablename__ = "video_triage_checks"
+    __table_args__ = (
+        UniqueConstraint("video_id", "policy_id", "policy_version"),
+        ForeignKeyConstraint(
+            ["policy_id", "policy_version"],
+            ["policies.policy_id", "policies.version"],
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint(
+            "status IN ('PENDING', 'RUNNING', 'SUCCEEDED', 'RETRY_WAIT', 'FAILED')",
+            name="ck_video_triage_checks_status",
+        ),
+        CheckConstraint(
+            "action IS NULL OR action IN ('SKIP', 'CREATE_CASE', 'NEEDS_HUMAN_REVIEW')",
+            name="ck_video_triage_checks_action",
+        ),
+        CheckConstraint(
+            "confidence IS NULL OR (confidence >= 0 AND confidence <= 1)",
+            name="ck_video_triage_checks_confidence",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    job_id: Mapped[str] = mapped_column(
+        ForeignKey("processing_jobs.id", ondelete="CASCADE"), index=True
+    )
+    video_id: Mapped[str] = mapped_column(
+        ForeignKey("videos.id", ondelete="CASCADE"), index=True
+    )
+    policy_id: Mapped[str] = mapped_column(String(128))
+    policy_version: Mapped[int] = mapped_column(Integer)
+    model_profile: Mapped[str] = mapped_column(String(128))
+    request_key: Mapped[str] = mapped_column(String(64), unique=True)
+    status: Mapped[str] = mapped_column(String(32), index=True)
+    action: Mapped[str | None] = mapped_column(String(32))
+    confidence: Mapped[float | None] = mapped_column(Numeric(5, 4))
+    reason_code: Mapped[str | None] = mapped_column(String(64))
+    matched_terms: Mapped[list[str]] = mapped_column(JSON, default=list)
+    matched_requirement_keys: Mapped[list[str]] = mapped_column(JSON, default=list)
+    summary: Mapped[str | None] = mapped_column(Text)
+    case_id: Mapped[str | None] = mapped_column(
+        ForeignKey("cases.id", ondelete="RESTRICT"), index=True
+    )
+    model_call_id: Mapped[str | None] = mapped_column(
+        ForeignKey("model_calls.id", ondelete="RESTRICT"), index=True
+    )
+    attempt: Mapped[int] = mapped_column(Integer, default=0)
     error_code: Mapped[str | None] = mapped_column(String(64))
 
 

@@ -44,7 +44,10 @@ class MediaApplicationService:
         self.vision = vision
 
     def register_file(
-        self, source: Path, original_name: str | None = None
+        self,
+        source: Path,
+        original_name: str | None = None,
+        model_profile: str | None = None,
     ) -> tuple[Video, MediaJob]:
         resolved = source.expanduser().resolve()
         if not resolved.is_file():
@@ -64,11 +67,33 @@ class MediaApplicationService:
         ):
             raise ValueError("video resolution exceeds configured limit")
         fingerprint = _sha256_file(resolved)
+        selected_profile = model_profile or self.settings.model_profile
+        request_key = sha256(f"MEDIA_PREPROCESS:{fingerprint}".encode()).hexdigest()
         with self.database.session() as session:
+            existing_job = session.scalar(
+                select(ProcessingJobRecord).where(
+                    ProcessingJobRecord.request_key == request_key
+                )
+            )
+            if existing_job is not None:
+                existing_video = session.get(VideoRecord, existing_job.subject_id)
+                if existing_job.type != "MEDIA_PREPROCESS" or existing_video is None:
+                    raise RuntimeError("media request key belongs to an invalid job")
+                if existing_video.model_profile != selected_profile:
+                    raise JobHandlerError(
+                        "VIDEO_PROFILE_CONFLICT",
+                        "the existing video uses another model profile",
+                    )
+                return _video(existing_video), _job(existing_job)
             existing = session.scalar(
                 select(VideoRecord).where(VideoRecord.fingerprint == fingerprint)
             )
             if existing is not None:
+                if existing.model_profile != selected_profile:
+                    raise JobHandlerError(
+                        "VIDEO_PROFILE_CONFLICT",
+                        "the existing video uses another model profile",
+                    )
                 job = session.scalar(
                     select(ProcessingJobRecord).where(
                         ProcessingJobRecord.subject_id == existing.id,
@@ -82,7 +107,6 @@ class MediaApplicationService:
         video_id = f"vid_{uuid4().hex}"
         suffix = resolved.suffix.lower() or ".bin"
         uri = self.artifacts.put_file(resolved, f"videos/{video_id}/source{suffix}")
-        request_key = sha256(f"MEDIA_PREPROCESS:{fingerprint}".encode()).hexdigest()
         now = utc_now()
         video_record = VideoRecord(
             id=video_id,
@@ -97,6 +121,8 @@ class MediaApplicationService:
             has_audio=metadata.has_audio,
             audio_codec=metadata.audio_codec,
             status=VideoStatus.UPLOADED,
+            model_profile=selected_profile,
+            triage_status="PENDING",
             created_at=now,
             updated_at=now,
         )
@@ -108,7 +134,9 @@ class MediaApplicationService:
             correlation_id=f"corr_{uuid4().hex}",
             status=JobStatus.PENDING,
             attempt=0,
-            max_attempts=3,
+            max_attempts=self.settings.job_max_attempts,
+            payload={"video_id": video_id, "model_profile": selected_profile},
+            retryable=False,
             created_at=now,
             updated_at=now,
         )
@@ -141,17 +169,24 @@ class MediaApplicationService:
                 job_type=record.type,
                 request_key=record.request_key,
                 correlation_id=record.correlation_id,
-                payload={"video_id": record.subject_id},
+                payload=record.payload or {
+                    "video_id": record.subject_id,
+                    "model_profile": "mock",
+                },
             )
 
-    def process_job(self, job_id: str) -> MediaJob:
+    def process_job(self, job_id: str, *, finalize: bool = True) -> MediaJob:
         with self.database.session() as session:
             job = session.get(ProcessingJobRecord, job_id)
             if job is None:
                 raise LookupError(job_id)
             if job.status == JobStatus.SUCCEEDED:
                 return _job(job)
-            if job.status == JobStatus.RUNNING:
+            if (
+                job.status == JobStatus.RUNNING
+                and job.lease_until is not None
+                and job.lease_until > utc_now()
+            ):
                 raise JobHandlerError("JOB_ALREADY_RUNNING", f"job is already running: {job_id}")
             if (
                 job.status in {JobStatus.FAILED, JobStatus.CANCELLED}
@@ -163,7 +198,13 @@ class MediaApplicationService:
                 update(ProcessingJobRecord)
                 .where(
                     ProcessingJobRecord.id == job_id,
-                    ProcessingJobRecord.status.in_([JobStatus.PENDING, JobStatus.RETRY_WAIT]),
+                    (
+                        ProcessingJobRecord.status.in_([JobStatus.PENDING, JobStatus.RETRY_WAIT])
+                        | (
+                            (ProcessingJobRecord.status == JobStatus.RUNNING)
+                            & (ProcessingJobRecord.lease_until < now)
+                        )
+                    ),
                     ProcessingJobRecord.attempt < ProcessingJobRecord.max_attempts,
                 )
                 .values(
@@ -182,11 +223,13 @@ class MediaApplicationService:
             video = session.get(VideoRecord, claimed)
             if video is None:
                 raise LookupError(claimed)
-            video.status = VideoStatus.PROCESSING
+            already_extracted = video.status == VideoStatus.READY
+            video.status = VideoStatus.PROCESSING if not already_extracted else VideoStatus.READY
             source_path = self.artifacts.resolve(video.artifact_uri)
 
         try:
-            self._extract(video.id, source_path, video.duration_ms, video.has_audio)
+            if not already_extracted:
+                self._extract(video.id, source_path, video.duration_ms, video.has_audio)
         except Exception:
             with self.database.session() as session:
                 failed_job = session.get(ProcessingJobRecord, job_id)
@@ -205,11 +248,52 @@ class MediaApplicationService:
             completed_video = session.get(VideoRecord, video.id)
             if completed_job is None or completed_video is None:
                 raise RuntimeError("media state disappeared")
-            completed_job.status = JobStatus.SUCCEEDED
-            completed_job.finished_at = utc_now()
-            completed_job.lease_until = None
             completed_video.status = VideoStatus.READY
+            if finalize:
+                completed_job.status = JobStatus.SUCCEEDED
+                completed_job.finished_at = utc_now()
+                completed_job.lease_until = None
             return _job(completed_job)
+
+    def complete_job(self, job_id: str) -> MediaJob:
+        with self.database.session() as session:
+            job = session.get(ProcessingJobRecord, job_id)
+            if job is None:
+                raise LookupError(job_id)
+            job.status = JobStatus.SUCCEEDED
+            job.finished_at = utc_now()
+            job.lease_until = None
+            job.next_attempt_at = None
+            job.retryable = False
+            job.error_code = None
+            job.error_message = None
+            return _job(job)
+
+    def fail_job(self, job_id: str, code: str, message: str, *, retryable: bool) -> MediaJob:
+        with self.database.session() as session:
+            job = session.get(ProcessingJobRecord, job_id)
+            if job is None:
+                raise LookupError(job_id)
+            can_retry = retryable and job.attempt < job.max_attempts
+            job.status = JobStatus.RETRY_WAIT if can_retry else JobStatus.FAILED
+            job.retryable = can_retry
+            job.error_code = code
+            job.error_message = message[:2000]
+            job.lease_until = None
+            job.finished_at = None if can_retry else utc_now()
+            if can_retry:
+                interval_index = min(
+                    max(job.attempt - 1, 0), len(self.settings.job_retry_intervals) - 1
+                )
+                delay_seconds = (
+                    self.settings.job_retry_intervals[interval_index]
+                    if self.settings.job_retry_intervals
+                    else 0
+                )
+                job.next_attempt_at = utc_now() + timedelta(seconds=delay_seconds)
+            else:
+                job.next_attempt_at = None
+            return _job(job)
 
     def get_video(self, video_id: str) -> Video:
         with self.database.session() as session:
@@ -377,6 +461,8 @@ def _video(record: VideoRecord) -> Video:
         has_audio=record.has_audio,
         audio_codec=record.audio_codec,
         status=record.status,
+        model_profile=record.model_profile,
+        triage_status=record.triage_status,
     )
 
 
@@ -388,4 +474,6 @@ def _job(record: ProcessingJobRecord) -> MediaJob:
         status=record.status,
         attempt=record.attempt,
         error_code=record.error_code,
+        error_message=record.error_message,
+        retryable=record.retryable,
     )

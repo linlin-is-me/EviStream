@@ -59,6 +59,17 @@ class Settings(BaseSettings):
     agent_timeout_seconds: int = Field(default=300, ge=10, le=3600)
     agent_job_lease_seconds: int = Field(default=120, ge=10, le=3600)
     agent_inspection_frame_count: int = Field(default=4, ge=1, le=8)
+    task_dispatcher: Literal["inline", "rq"] = "inline"
+    redis_url: str = "redis://localhost:6379/0"
+    rq_queue: str = "evistream"
+    rq_job_timeout_seconds: int = Field(default=3600, ge=10, le=86400)
+    rq_result_ttl_seconds: int = Field(default=0, ge=0)
+    job_max_attempts: int = Field(default=3, ge=1, le=10)
+    job_retry_intervals: list[int] = Field(default_factory=lambda: [5, 30])
+    job_requeue_batch_size: int = Field(default=100, ge=1, le=1000)
+    auto_triage: bool = True
+    triage_max_frames: int = Field(default=4, ge=0, le=8)
+    triage_max_text_chars: int = Field(default=12_000, ge=100, le=100_000)
 
     def model_environment(self) -> dict[str, str]:
         values = {

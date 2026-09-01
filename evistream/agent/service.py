@@ -186,7 +186,14 @@ class AgentInvestigationService:
                     correlation_id=correlation_id,
                     status=JobStatus.PENDING,
                     attempt=0,
-                    max_attempts=3,
+                    max_attempts=self.settings.job_max_attempts,
+                    payload={
+                        "run_id": run_id,
+                        "case_id": case.id,
+                        "model_profile": selected_profile,
+                        "scope_requirement_ids": requested_scope,
+                    },
+                    retryable=False,
                     created_at=now,
                     updated_at=now,
                 )
@@ -249,12 +256,13 @@ class AgentInvestigationService:
             job_type=job.type,
             request_key=job.request_key,
             correlation_id=job.correlation_id,
-            payload={
-                "run_id": run.id,
-                "case_id": run.case_id,
-                "model_profile": run.model_profile,
-            },
-        )
+                payload=job.payload
+                or {
+                    "run_id": run.id,
+                    "case_id": run.case_id,
+                    "model_profile": run.model_profile,
+                },
+            )
 
     def claim(self, request: JobRequest) -> InvestigationState | InvestigationResult:
         with self.database.session() as session:
@@ -473,6 +481,51 @@ class AgentInvestigationService:
             if case is not None:
                 case.status = CaseStatus.NEEDS_HUMAN_REVIEW
                 case.updated_at = now
+
+    def defer_retry(self, run_id: str, error_code: str) -> None:
+        now = utc_now()
+        with self.database.session() as session:
+            run = session.get(AgentRunRecord, run_id)
+            if run is None or run.job_id is None:
+                raise AgentRuntimeError("AGENT_CHECKPOINT_INVALID", "run job is missing")
+            job = session.get(ProcessingJobRecord, run.job_id)
+            if job is None:
+                raise AgentRuntimeError("AGENT_CHECKPOINT_INVALID", "run job is missing")
+            can_retry = job.attempt < job.max_attempts
+            if not can_retry:
+                run.status = InvestigationStatus.FAILED
+                run.stop_reason = error_code
+                run.lease_until = None
+                run.updated_at = now
+                job.status = JobStatus.FAILED
+                job.retryable = False
+                job.error_code = error_code
+                job.finished_at = now
+                job.lease_until = None
+                job.updated_at = now
+                case = session.get(CaseRecord, run.case_id)
+                if case is not None:
+                    case.status = CaseStatus.NEEDS_HUMAN_REVIEW
+                    case.updated_at = now
+                return
+            interval_index = min(
+                max(job.attempt - 1, 0), len(self.settings.job_retry_intervals) - 1
+            )
+            delay = (
+                self.settings.job_retry_intervals[interval_index]
+                if self.settings.job_retry_intervals
+                else 0
+            )
+            run.status = InvestigationStatus.PENDING
+            run.lease_until = None
+            run.stop_reason = error_code
+            run.updated_at = now
+            job.status = JobStatus.RETRY_WAIT
+            job.retryable = True
+            job.error_code = error_code
+            job.next_attempt_at = now + timedelta(seconds=delay)
+            job.lease_until = None
+            job.updated_at = now
 
     def get_result(self, run_id: str) -> InvestigationResult:
         with self.database.session() as session:

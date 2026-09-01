@@ -3,8 +3,8 @@
 EviStream is an evidence-grounded investigation agent for long-form video moderation.
 The repository contains the provider-neutral foundation, PostgreSQL-backed media
 pipeline, versioned moderation policies, hybrid retrieval and a uniform video-tool layer.
-Stage 4 adds a checkpointed investigation loop with audited model and tool calls. Stage 5 turns
-its Evidence into formal decisions, human governance records, and selective policy replay.
+Stage 6 adds automatic policy triage, PostgreSQL-backed RQ jobs, governance APIs and three
+React workspaces for tasks, cases, and policy replay.
 
 ## Development quick start
 
@@ -31,6 +31,7 @@ evistream media-ingest tests/fixtures/media/stage0_sample.mp4 --process
 evistream seed-demo --check
 make verify-stage4
 make verify-stage5
+make verify-stage6
 ```
 
 In another terminal:
@@ -101,10 +102,23 @@ Case to `INVESTIGATED`; incomplete or conflicting evidence moves it to
 `NEEDS_HUMAN_REVIEW`. Neither path writes a formal RequirementResult or Decision. See
 [`docs/agent-runtime.md`](docs/agent-runtime.md).
 
+## Stage 6 demo deployment
+
+```bash
+make demo-up
+make verify-deploy
+make demo-down
+```
+
+The default deployment uses Mock adapters. It runs migration, API, RQ Worker, PostgreSQL,
+Redis and the Web application, while preserving database and Artifact volumes across ordinary
+container rebuilds. See [`docs/deployment.md`](docs/deployment.md) and
+[`docs/api.md`](docs/api.md).
+
 ## Project boundaries
 
-Stage 5 ends at CLI-driven governance and inline replay. Redis/RQ queues, Case HTTP APIs,
-review pages, authentication, and formal evaluation data remain later stages. See
+Stage 6 ends at the local asynchronous Web workflow. Production authentication, tenant
+isolation, formal evaluation data and hardened public deployment remain later stages. See
 [`EviStream开发文档.md`](EviStream开发文档.md) for the complete architecture and roadmap.
 
 ## License

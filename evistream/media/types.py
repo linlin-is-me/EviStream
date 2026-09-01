@@ -36,6 +36,8 @@ class Video(BaseModel):
     has_audio: bool
     audio_codec: str | None
     status: VideoStatus
+    model_profile: str = "mock"
+    triage_status: str = "PENDING"
 
 
 class MediaJob(BaseModel):
@@ -45,6 +47,8 @@ class MediaJob(BaseModel):
     status: JobStatus
     attempt: int = Field(ge=0)
     error_code: str | None = None
+    error_message: str | None = None
+    retryable: bool = False
 
 
 class SegmentBoundary(BaseModel):
